@@ -16,6 +16,11 @@ Usage:
     # Use with unconfigured sensor (default 115200 baud, 50Hz):
     python3 tfa300.py --baud 115200 [serial_port]
 
+    # Power consumption testing:
+    python3 tfa300.py --disable-output [serial_port]  # Disable sensor output
+    python3 tfa300.py --enable-output [serial_port]   # Re-enable sensor output
+    python3 tfa300.py --set-rate 1 [serial_port]      # Set frame rate (1-10000 Hz)
+
 Arguments:
     serial_port: Serial port device (default: /dev/ttyUSB0)
 """
@@ -648,6 +653,22 @@ def main():
         help='Configure sensor for 10kHz and exit (requires power cycle after)'
     )
     parser.add_argument(
+        '--disable-output',
+        action='store_true',
+        help='Disable data output and exit (for power consumption testing)'
+    )
+    parser.add_argument(
+        '--enable-output',
+        action='store_true',
+        help='Enable data output and exit'
+    )
+    parser.add_argument(
+        '--set-rate',
+        type=int,
+        metavar='HZ',
+        help='Set frame rate (1-10000 Hz) and exit'
+    )
+    parser.add_argument(
         '--baud',
         type=int,
         default=921600,
@@ -726,6 +747,74 @@ def main():
         print("\nNote: Frame format doesn't persist, but 921600 baud")
         print("      can handle 10kHz with 9-byte frames (max ~12kHz)")
         print()
+        return 0
+
+    # Disable output mode: disable data output and exit
+    if args.disable_output:
+        print("DISABLE OUTPUT MODE")
+        print("="*60)
+        sensor = TFA300(args.port, baudrate=args.baud)
+        if not sensor.connect():
+            print("ERROR: Failed to connect")
+            return 1
+
+        sensor.disable_data_output()
+        time.sleep(0.2)
+        sensor.close()
+
+        print("\nData output disabled")
+        print("Use --enable-output to re-enable")
+        return 0
+
+    # Enable output mode: enable data output and exit
+    if args.enable_output:
+        print("ENABLE OUTPUT MODE")
+        print("="*60)
+        sensor = TFA300(args.port, baudrate=args.baud)
+        if not sensor.connect():
+            print("ERROR: Failed to connect")
+            return 1
+
+        sensor.enable_data_output()
+        time.sleep(0.2)
+        sensor.close()
+
+        print("\nData output enabled")
+        return 0
+
+    # Set frame rate mode: set frame rate and exit
+    if args.set_rate is not None:
+        if args.set_rate < 1 or args.set_rate > 10000:
+            print("ERROR: Frame rate must be between 1 and 10000 Hz")
+            return 1
+
+        print(f"SET FRAME RATE MODE: {args.set_rate} Hz")
+        print("="*60)
+        sensor = TFA300(args.port, baudrate=args.baud)
+        if not sensor.connect():
+            print("ERROR: Failed to connect")
+            return 1
+
+        print("Disabling data output...")
+        sensor.disable_data_output()
+        time.sleep(0.2)
+
+        print(f"Setting frame rate to {args.set_rate} Hz...")
+        sensor.set_frame_rate(args.set_rate)
+        time.sleep(0.2)
+
+        print("Saving configuration...")
+        sensor.save_configuration()
+        time.sleep(0.2)
+
+        print("Re-enabling data output...")
+        sensor.enable_data_output()
+        time.sleep(0.2)
+
+        sensor.close()
+
+        print(f"\nFrame rate set to {args.set_rate} Hz and saved to non-volatile memory")
+        print("Change persists after power cycle")
         return 0
 
     # Normal mode: connect and plot
