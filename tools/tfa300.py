@@ -487,123 +487,87 @@ class TFA300:
 class TFA300Plotter:
     """Real-time plotter for TFA300 data"""
 
-    def __init__(self, sensor, max_points=10000, debug=False, frame_rate=10000, resample_factor=10):
+    def __init__(self, sensor, max_points=10000, debug=False, frame_rate=10000):
         self.sensor = sensor
         self.max_points = max_points
         self.debug = debug
         self.frame_rate = frame_rate
         self.frame_interval = 1.0 / frame_rate  # Time between frames in seconds
-        self.resample_factor = resample_factor  # Group N samples into one bucket
 
-        # Raw data buffers (more points since we resample)
+        # Raw data buffers
         self.raw_times = deque(maxlen=max_points)
         self.raw_distances = deque(maxlen=max_points)
         self.raw_strengths = deque(maxlen=max_points)
-
-        # Resampled data for plotting
-        self.plot_times = deque(maxlen=max_points // resample_factor)
-        self.dist_min = deque(maxlen=max_points // resample_factor)
-        self.dist_max = deque(maxlen=max_points // resample_factor)
-        self.dist_avg = deque(maxlen=max_points // resample_factor)
-        self.strength_min = deque(maxlen=max_points // resample_factor)
-        self.strength_max = deque(maxlen=max_points // resample_factor)
-        self.strength_avg = deque(maxlen=max_points // resample_factor)
 
         self.start_time = time.time()
         self.frame_count = 0  # Total frames received
         self.sample_number = 0  # Sample counter for timestamp calculation
         self.last_fps_time = time.time()
         self.fps = 0
+        self.paused = False  # Pause/resume state
 
-        # Setup plot
+        # Setup plot with 2 subplots
         self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(14, 10))
         self.fig.suptitle('TFA300 LIDAR Real-time Data', fontsize=14, fontweight='bold')
 
-        # Distance plot with min/max/avg
-        self.line1_min, = self.ax1.plot([], [], 'b-', linewidth=0.5, alpha=0.6, label='Min')
-        self.line1_max, = self.ax1.plot([], [], 'r-', linewidth=0.5, alpha=0.6, label='Max')
-        self.line1_avg, = self.ax1.plot([], [], 'g-', linewidth=1.5, label='Avg')
-        self.ax1.fill_between([], [], [], alpha=0.2, color='gray', label='Range')
+        # Raw distance plot - TOP (dark cyan-green, 2x thick)
+        self.line1_dist, = self.ax1.plot([], [], '-', color='#008B8B', linewidth=1.0, label='Distance')
         self.ax1.set_ylabel('Distance (m)', fontsize=10)
         self.ax1.set_xlabel('Time (s)', fontsize=10)
         self.ax1.grid(True, alpha=0.3)
-        self.ax1.set_title(f'Distance Measurement (resampled {self.resample_factor}x)')
+        self.ax1.set_title('Distance Measurement (full resolution - use zoom to inspect)')
         self.ax1.legend(loc='upper right')
 
-        # Signal strength plot with min/max/avg
-        self.line2_min, = self.ax2.plot([], [], 'b-', linewidth=0.5, alpha=0.6, label='Min')
-        self.line2_max, = self.ax2.plot([], [], 'r-', linewidth=0.5, alpha=0.6, label='Max')
-        self.line2_avg, = self.ax2.plot([], [], 'g-', linewidth=1.5, label='Avg')
+        # Raw signal strength plot - BOTTOM (dark orange/brownish)
+        self.line2_strength, = self.ax2.plot([], [], '-', color='#CC6600', linewidth=1.0, label='Signal strength')
         self.ax2.set_ylabel('Signal Strength', fontsize=10)
         self.ax2.set_xlabel('Time (s)', fontsize=10)
         self.ax2.grid(True, alpha=0.3)
-        self.ax2.set_title(f'Signal Strength (resampled {self.resample_factor}x)')
+        self.ax2.set_title('Signal Strength (full resolution - use zoom to inspect)')
         self.ax2.axhline(y=40, color='orange', linestyle='--', alpha=0.5, label='Low reliability threshold')
         self.ax2.legend(loc='upper right')
 
         plt.tight_layout()
 
-    def resample_data(self):
-        """Resample raw data into buckets with min/max/avg"""
-        if len(self.raw_times) < self.resample_factor:
-            return  # Not enough data yet
+        # Connect keyboard event handler
+        self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
 
-        # Clear resampled data
-        self.plot_times.clear()
-        self.dist_min.clear()
-        self.dist_max.clear()
-        self.dist_avg.clear()
-        self.strength_min.clear()
-        self.strength_max.clear()
-        self.strength_avg.clear()
-
-        # Convert to lists for easier indexing
-        times = list(self.raw_times)
-        distances = list(self.raw_distances)
-        strengths = list(self.raw_strengths)
-
-        # Process in buckets
-        num_buckets = len(times) // self.resample_factor
-        for i in range(num_buckets):
-            start_idx = i * self.resample_factor
-            end_idx = start_idx + self.resample_factor
-
-            # Get bucket data
-            bucket_times = times[start_idx:end_idx]
-            bucket_dists = distances[start_idx:end_idx]
-            bucket_strengths = strengths[start_idx:end_idx]
-
-            # Calculate statistics
-            self.plot_times.append(bucket_times[0])  # Use first timestamp in bucket
-            self.dist_min.append(min(bucket_dists))
-            self.dist_max.append(max(bucket_dists))
-            self.dist_avg.append(sum(bucket_dists) / len(bucket_dists))
-            self.strength_min.append(min(bucket_strengths))
-            self.strength_max.append(max(bucket_strengths))
-            self.strength_avg.append(sum(bucket_strengths) / len(bucket_strengths))
+    def on_key_press(self, event):
+        """Handle keyboard events"""
+        if event.key == ' ':  # Spacebar
+            self.paused = not self.paused
+            state = "PAUSED" if self.paused else "RESUMED"
+            print(f"\n{state} - Press spacebar to {'resume' if self.paused else 'pause'}")
 
     def update_plot(self, frame_num):
         """Update plot with new data - processes multiple frames per update"""
         frames_read = 0
+        frames_dropped = 0
 
         debug_this_frame = self.debug and frame_num < 5  # Debug first 5 updates
 
         # Read all available frames from queue
         # The background thread is continuously filling this queue
+        # We must drain the queue even when paused to prevent serial buffer overflow
         while True:
             data = self.sensor.read_frame_from_queue()
             if data:
-                # Timestamp based on sample number and known frame rate
-                # Each sample is exactly frame_interval apart
-                timestamp = self.sample_number * self.frame_interval
+                if not self.paused:
+                    # Normal operation: add data to buffers
+                    # Timestamp based on sample number and known frame rate
+                    # Each sample is exactly frame_interval apart
+                    timestamp = self.sample_number * self.frame_interval
 
-                self.raw_times.append(timestamp)
-                self.raw_distances.append(data['distance_m'])
-                self.raw_strengths.append(data['strength'])
+                    self.raw_times.append(timestamp)
+                    self.raw_distances.append(data['distance_m'])
+                    self.raw_strengths.append(data['strength'])
 
-                self.sample_number += 1
-                self.frame_count += 1
-                frames_read += 1
+                    self.sample_number += 1
+                    self.frame_count += 1
+                    frames_read += 1
+                else:
+                    # Paused: discard frame but keep draining queue
+                    frames_dropped += 1
             else:
                 # No more frames available
                 break
@@ -612,9 +576,6 @@ class TFA300Plotter:
             queue_size = self.sensor.get_queue_size()
             print(f"DEBUG: Update {frame_num}: Read {frames_read} frames, sample# {self.sample_number}, queue: {queue_size}")
 
-        # Resample data for plotting
-        self.resample_data()
-
         # Update FPS calculation (based on actual frames processed)
         now = time.time()
         if now - self.last_fps_time >= 1.0:
@@ -622,39 +583,37 @@ class TFA300Plotter:
             self.frame_count = 0
             self.last_fps_time = now
 
-        # Update plots if we have resampled data
-        if len(self.plot_times) > 0:
-            times_list = list(self.plot_times)
+        # Update plots with raw data
+        if len(self.raw_times) > 0:
+            times_list = list(self.raw_times)
+            dist_list = list(self.raw_distances)
+            strength_list = list(self.raw_strengths)
 
-            # Update distance plot
-            self.line1_min.set_data(times_list, list(self.dist_min))
-            self.line1_max.set_data(times_list, list(self.dist_max))
-            self.line1_avg.set_data(times_list, list(self.dist_avg))
+            # Update distance plot - TOP
+            self.line1_dist.set_data(times_list, dist_list)
             self.ax1.relim()
             self.ax1.autoscale_view()
 
-            # Update signal strength plot
-            self.line2_min.set_data(times_list, list(self.strength_min))
-            self.line2_max.set_data(times_list, list(self.strength_max))
-            self.line2_avg.set_data(times_list, list(self.strength_avg))
+            # Update signal strength plot - BOTTOM
+            self.line2_strength.set_data(times_list, strength_list)
             self.ax2.relim()
             self.ax2.autoscale_view()
 
             # Update title with stats
-            if len(self.raw_distances) > 0:
-                avg_dist = sum(self.raw_distances) / len(self.raw_distances)
-                avg_str = sum(self.raw_strengths) / len(self.raw_strengths)
-                time_span = times_list[-1] - times_list[0] if len(times_list) > 1 else 0
-                self.fig.suptitle(
-                    f'TFA300 LIDAR Real-time Data | '
-                    f'FPS: {self.fps:.0f} Hz | '
-                    f'Time span: {time_span:.2f}s | '
-                    f'Avg Dist: {avg_dist:.3f}m | '
-                    f'Avg Strength: {avg_str:.0f}',
-                    fontsize=12, fontweight='bold'
-                )
+            avg_dist = sum(dist_list) / len(dist_list)
+            avg_str = sum(strength_list) / len(strength_list)
+            time_span = times_list[-1] - times_list[0] if len(times_list) > 1 else 0
+            pause_indicator = " [PAUSED - Press SPACE to resume]" if self.paused else ""
+            self.fig.suptitle(
+                f'TFA300 LIDAR Real-time Data{pause_indicator} | '
+                f'FPS: {self.fps:.0f} Hz | '
+                f'Time span: {time_span:.2f}s | '
+                f'Avg Dist: {avg_dist:.3f}m | '
+                f'Avg Strength: {avg_str:.0f}',
+                fontsize=12, fontweight='bold'
+            )
 
-        return self.line1_min, self.line1_max, self.line1_avg, self.line2_min, self.line2_max, self.line2_avg
+        return self.line1_dist, self.line2_strength
 
     def run(self):
         """Start the plotting animation"""
@@ -699,13 +658,7 @@ def main():
         '--max-points',
         type=int,
         default=10000,
-        help='Maximum number of raw samples to buffer (default: 10000 = 1 second at 10kHz)'
-    )
-    parser.add_argument(
-        '--resample',
-        type=int,
-        default=10,
-        help='Resample factor - group N samples into buckets for min/max/avg (default: 10)'
+        help='Maximum number of samples to buffer (default: 10000 = 1 second at 10kHz)'
     )
     parser.add_argument(
         '--debug',
@@ -846,7 +799,8 @@ def main():
         # Create plotter and run
         print("Starting real-time plot...")
         print(f"  Buffer: {args.max_points} samples ({args.max_points/10000:.1f}s at 10kHz)")
-        print(f"  Resample: {args.resample}x (plots {args.max_points//args.resample} points)")
+        print("  Press SPACEBAR to pause/resume data collection")
+        print("  Use matplotlib zoom/pan tools to inspect data")
         print("Close the plot window to exit.\n")
 
         # Use known frame rate (10kHz if configured, or lower for default)
@@ -854,8 +808,7 @@ def main():
             sensor,
             max_points=args.max_points,
             debug=args.debug,
-            frame_rate=10000,
-            resample_factor=args.resample
+            frame_rate=10000
         )
         plotter.run()
 
