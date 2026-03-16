@@ -110,10 +110,10 @@ probe-rs attach --chip STM32F722RETx
 
 **Current Status**: Minimal firmware boots and logs heartbeat. Pinout identified from Betaflight MAMBAF722_I2C target. Hardware modification planned (desolder OSD chip, rewire SPI2 to ADXL373). Ready to implement:
 - Motor DShot outputs (PC8, PC9)
-- LIDAR UART RX (TFA300 on UART1 RX=PB7)
+- LIDAR UART RX (TFA300 on UART2 RX=PA3)
 - WiFi adapter UART (UART4 TX=PA0, RX=PA1)
 - Accelerometer SPI (ADXL373 on SPI2: CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15)
-- RC receiver input capture (optional)
+- RC receiver input capture (UART1 RX=PB7 with TIM4_CH2)
 - Battery voltage ADC (PC1)
 
 ## Monitoring/Control
@@ -157,8 +157,8 @@ probe-rs attach --chip STM32F722RETx
 - MOTOR4: PA9 (TIM1_CH2)
 
 **UARTs** (board default connections):
-- UART1: TX=PB6, RX=PB7 (Receiver port - **available, use for LIDAR TFA300**)
-- UART2: TX=PA2, RX=PA3 (Vacant - **available**)
+- UART1: TX=PB6, RX=PB7 (Receiver port - **RC receiver input**, PB7 also has TIM4_CH2)
+- UART2: TX=PA2, RX=PA3 (Vacant - **LIDAR TFA300 on RX**)
 - UART3: TX=PB10, RX=PB11 (VTX port - **available**, no video transmitter)
 - UART4: TX=PA0, RX=PA1 (**WiFi adapter - connected on board**)
 - UART5: TX=PC12, RX=PD2 (F.Port - **available** unless using F.Port)
@@ -194,17 +194,24 @@ probe-rs attach --chip STM32F722RETx
 
 **External Hardware**:
 - Accelerometer: ADXL373 (SPI2) - wired to freed OSD pins
-- LIDAR: Benewake TFA300 (UART1 RX)
+- LIDAR: Benewake TFA300 (UART2 RX=PA3)
+- RC Receiver: 1 channel on UART1 RX=PB7 (TIM4_CH2 for input capture)
 - Motors: 2x ESCs via DShot (PC8, PC9)
 - WiFi: UART-to-WiFi adapter (UART4)
 
 **TFA300 LIDAR Connector Pinout** (JST GH 6-pin):
 - Blue: UART_Rx (connects to STM32 TX - unused)
-- Brown: UART_Tx (connects to STM32 RX - UART1 RX=PB7)
+- Brown: UART_Tx (connects to STM32 RX - UART2 RX=PA3)
 - White: CAN_L (unused)
 - Green: CAN_H (unused)
 - Red: VCC (5V ±10%)
 - Black: GND
+
+**RC Receiver Wiring**:
+- Signal: Connect to PB7 (UART1 RX pad, will use TIM4_CH2 for input capture)
+- VCC: 5V from FC
+- GND: GND from FC
+- Note: For simple on/off detection, threshold will be at ~1.5ms (50% of 1-2ms range)
 
 **ADXL373 Accelerometer Wiring**:
 - CS:   PB12 (wire to AT7456E pin 8 pad)
