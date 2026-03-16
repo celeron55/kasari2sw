@@ -80,8 +80,16 @@ pub mod kasari {
     #[cfg(target_os = "none")]
     use alloc::vec::Vec;
     use core::f32::consts::PI;
-    #[cfg(target_os = "none")]
+    #[cfg(all(target_os = "none", target_arch = "xtensa"))]
     use esp_println::println;
+    #[cfg(all(target_os = "none", target_arch = "arm"))]
+    macro_rules! println {
+        ($($arg:tt)*) => {
+            // Debug prints disabled for STM32 (use defmt logging in embedded.rs instead)
+        };
+    }
+    #[cfg(all(target_os = "none", target_arch = "arm"))]
+    use println;
     use libm::{atan2f, cosf, fabsf, sqrtf};
     use num_traits::float::FloatCore;
     #[cfg(not(target_os = "none"))]
@@ -713,11 +721,11 @@ pub mod kasari {
 
                 if debug {
                     println!(
-                        "intended: {:.0},{:.0}, vel: {:.0},{:.0}, angular_correction_flip: {}",
-                        self.target.movement_x,
-                        self.target.movement_y,
-                        self.detection_state.velocity.0,
-                        self.detection_state.velocity.1,
+                        "intended: {},{}, vel: {},{}, angular_correction_flip: {}",
+                        self.target.movement_x as i32,
+                        self.target.movement_y as i32,
+                        self.detection_state.velocity.0 as i32,
+                        self.detection_state.velocity.1 as i32,
                         self.angular_correction_flip
                     );
                 }

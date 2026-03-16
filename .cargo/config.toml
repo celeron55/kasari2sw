@@ -1,13 +1,14 @@
-[target.xtensa-esp32-none-elf]
-runner = "espflash flash --monitor --chip esp32"
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32F722RETx"
 rustflags = [
-  "-C", "link-arg=-nostartfiles",
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
 ]
 
 [unstable]
-build-std = ["alloc", "core"]
+build-std = ["core", "alloc"]
 
 [alias]
 build-pc = ["build", "--features", "pc"]
-build-esp = ["build", "--target", "xtensa-esp32-none-elf", "--features", "esp"]
-run-esp = ["run", "--target", "xtensa-esp32-none-elf", "--features", "esp", "--bin", "kasarisw"]
+build-stm = ["build", "--target", "thumbv7em-none-eabihf", "--features", "stm32"]
+run-stm = ["run", "--target", "thumbv7em-none-eabihf", "--features", "stm32", "--bin", "kasarisw"]

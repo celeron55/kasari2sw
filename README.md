@@ -43,21 +43,21 @@ logic data (e.g., detector, plans) uniformly, avoiding duplication. Flags like
 the robot over wifi.
 
 ## Project Structure
-- `src/embedded.rs`: ESP32 firmware entrypoint.
-- `src/sensors.rs`: Sensor tasks (LIDAR UART parsing, accel SPI, RC RMT).
-- `src/shared/mod.rs`: Core logic (MainLogic, MotorModulator, event handling).
-- `src/shared/algorithm.rs`: ObjectDetector (binning, RPM from accel, detection via window averages/large changes).
+- `src/embedded.rs`: STM32F7 firmware entrypoint.
+- `src/sensors.rs`: Sensor tasks (TFA300 LIDAR UART parsing, ADXL373 accel SPI, RC PWM capture).
+- `src/shared/mod.rs`: Core logic (MainLogic, MotorModulator, event handling) - **platform-independent**.
+- `src/shared/algorithm.rs`: ObjectDetector (binning, RPM from accel, detection via window averages/large changes) - **platform-independent**.
 - `src/simulator/mod.rs`: Simulator entrypoint.
 - `src/simulator/app.rs`: Egui app for visualization.
 - `src/simulator/events.rs`: Event parsing from JSON logs.
 - `src/simulator/physics.rs`: Virtual world raycasting, robot physics.
 - `src/simulator/sources.rs`: Event sources (file replay or simulation).
 - `tools/event_monitor.py`: Tkinter GUI for monitoring/controls/logging.
-- `tools/download_events.py`: CLI for downloading events from robot's flash storage
+- `tools/download_events.py`: CLI for downloading events from robot's flash storage.
 - `tools/parse_events.py`: CLI binary event parser to JSON.
-- `tools/combat_wizard.py`: Tkinter GUI for combat workflow. Combines event_monitor.py and download_events.py functionalities into one tool
-- `rust-toolchain.toml`: Specifies ESP toolchain (channel: esp, target: xtensa-esp32-none-elf).
-- `config.toml`: Cargo config with target rustflags, unstable build-std, aliases (build-pc, build-esp, run-esp).
+- `tools/combat_wizard.py`: Tkinter GUI for combat workflow. Combines event_monitor.py and download_events.py functionalities into one tool.
+- `rust-toolchain.toml`: Specifies stable Rust toolchain (target: thumbv7em-none-eabihf for STM32F722).
+- `.cargo/config.toml`: Cargo config with probe-rs runner, build aliases (build-pc, build-stm, run-stm).
 
 ## Key Algorithms
 - **RPM from Accel**: `a_calibrated = accel_g - offset; omega = sqrt(|a| / r); rpm = (omega * 60) / (2π)` (r=0.0145m).
@@ -67,17 +67,20 @@ the robot over wifi.
 - **Autonomous**: Blend vectors: away from wall + toward open/object; clamp mag 0.5-1.0.
 
 ## Prerequisites
-- Rust 1.88 (stable); project uses rust-toolchain.toml for ESP target.
-- PC: No special setup.
-- Embedded: Python 3 (tkinter for tools); install ESP32 toolchain:
+- Rust stable (configured via rust-toolchain.toml for STM32 ARM Cortex-M7 target).
+- PC: No special setup for simulator.
+- Embedded: Python 3 (tkinter for tools); install probe-rs for flashing:
   ```sh
-  rm -rf ~/.rustup/toolchains/esp  # Clean install (optional)
-  rustup override unset
-  cargo install espup
-  espup install
-  cp $HOME/export-esp.sh .  # Copy to project root
+  cargo install probe-rs-tools --locked
+  rustup target add thumbv7em-none-eabihf
   ```
-- Hardware: ESP32, LDS02RR (RX only), ADXL373 (SPI), motors/ESCs (PWM), battery (ADC).
+- Hardware:
+  - **MCU**: STM32F722RET6 (Diatone Mamba F722APP Flight Controller)
+  - **LIDAR**: Benewake TFA300 (UART @ 115200 baud, no encoder needed)
+  - **Accelerometer**: ADXL373 (SPI)
+  - **Motors**: 2x ESCs (400 Hz PWM)
+  - **Battery**: LiPo (ADC voltage monitoring)
+  - **WiFi**: FC-integrated UART-to-WiFi adapter
 
 ## Build/Run
 ### PC Simulator
@@ -93,14 +96,25 @@ cargo +stable flamegraph -b simulator --features=pc -- --sim --headless --end-ti
 flamegraph --perfdata perf.data --image-width 4096
 ```
 
-### Embedded Firmware
+### Embedded Firmware (STM32F722)
 ```sh
-. export-esp.sh  # Source toolchain env
-export SSID=... PASSWORD=...  # For STA WiFi
-cargo build-esp  # Alias for cargo build --target xtensa-esp32-none-elf --features esp
-cargo run-esp  # Alias for cargo run --target xtensa-esp32-none-elf --features esp --bin kasarisw (flash/run)
-./monitor.sh  # Serial logs
+cargo build-stm  # Alias for cargo build --target thumbv7em-none-eabihf --features stm32
+cargo run-stm    # Alias for cargo run --target thumbv7em-none-eabihf --features stm32 --bin kasarisw
+                 # Uses probe-rs to flash and run on STM32F722
 ```
+
+**Note**: Logs are output via defmt over RTT (Real-Time Transfer). View with:
+```sh
+probe-rs attach --chip STM32F722RETx
+```
+
+**Current Status**: Minimal firmware boots and logs heartbeat. **Awaiting Mamba F722APP pinout** to implement:
+- Motor PWM outputs
+- LIDAR UART (TFA300 RX)
+- WiFi adapter UART (TX/RX)
+- Accelerometer SPI
+- RC receiver input capture
+- Battery voltage ADC
 
 ## Monitoring/Control
 - GUI: `python tools/event_monitor.py` (connect to 192.168.2.1:8080 AP or STA IP:8080).
@@ -110,17 +124,32 @@ cargo run-esp  # Alias for cargo run --target xtensa-esp32-none-elf --features e
 - CLI: `nc IP 8080 | python tools/parse_events.py > log.json`.
 - Events: Binary (tag XOR 0x5555 + payload) over TCP; JSON in logs.
 
-## Hardware Pinout (ESP32)
-- Motors: GPIO26/27 (PWM right/left).
-- LIDAR: GPIO13 (encoder PWM), GPIO16 (UART RX).
-- Accel: GPIO5 (CS), GPIO18 (SCLK), GPIO19 (MISO), GPIO23 (MOSI).
-- RC: GPIO34 (RMT PWM in).
-- Battery: GPIO39 (ADC).
+## Hardware Pinout (STM32F722 - Mamba F722APP)
+
+**⚠️ TBD - Awaiting official Mamba F722APP schematic/pinout**
+
+Expected peripherals (pins to be determined):
+- **Motors**: 2x PWM outputs (likely motor outputs 1-2, TIM3 or TIM4)
+- **LIDAR**: UART RX only (TFA300 @ 115200 baud, likely USART1 or USART6)
+  - **Note**: TFA300 needs NO encoder PWM (unlike old LDS02RR setup)
+- **WiFi Adapter**: UART TX/RX (likely USART2 or USART3)
+- **Accelerometer**: SPI1 (SCK, MISO, MOSI, CS for ADXL373)
+- **RC Receiver**: Timer input capture (PWM measurement, likely TIM1 or TIM2)
+- **Battery**: ADC input (voltage divider)
+- **LED**: Status indicator GPIO
+
+**TFA300 Connector Pinout** (JST GH 6-pin):
+- Blue: UART_Rx (connects to STM32 TX - unused)
+- Brown: UART_Tx (connects to STM32 RX)
+- White: CAN_L (unused)
+- Green: CAN_H (unused)
+- Red: VCC (5V ±10%)
+- Black: GND
 
 ## Dependencies (Cargo.toml)
-- Shared: embassy-sync, ringbuffer, static_cell, arrayvec, num-traits, libm.
-- Embedded: esp-hal, esp-wifi, esp-alloc, etc.
-- Simulator: clap, eframe/egui_plot, serde_json.
+- **Shared** (platform-independent): embassy-sync, ringbuffer, static_cell, arrayvec, num-traits, libm, critical-section.
+- **Embedded** (STM32): embassy-stm32, embassy-executor, embassy-time, cortex-m, cortex-m-rt, alloc-cortex-m, defmt, defmt-rtt, panic-probe, embedded-hal.
+- **Simulator** (PC): clap, eframe, egui_plot, serde_json, rand, ctrlc, crossbeam-channel.
 
 ## Event Format
 - Lidar: [ts, d1..d4] (mm).
