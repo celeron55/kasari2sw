@@ -108,13 +108,13 @@ cargo run-stm    # Alias for cargo run --target thumbv7em-none-eabihf --features
 probe-rs attach --chip STM32F722RETx
 ```
 
-**Current Status**: Minimal firmware boots and logs heartbeat. Pinout identified from Betaflight MAMBAF722_I2C target. Ready to implement:
-- Motor PWM outputs
-- LIDAR UART (TFA300 RX)
-- WiFi adapter UART (TX/RX)
-- Accelerometer SPI
-- RC receiver input capture
-- Battery voltage ADC
+**Current Status**: Minimal firmware boots and logs heartbeat. Pinout identified from Betaflight MAMBAF722_I2C target. Hardware modification planned (desolder OSD chip, rewire SPI2 to ADXL373). Ready to implement:
+- Motor DShot outputs (PC8, PC9)
+- LIDAR UART RX (TFA300 on UART1 RX=PB7)
+- WiFi adapter UART (UART4 TX=PA0, RX=PA1)
+- Accelerometer SPI (ADXL373 on SPI2: CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15)
+- RC receiver input capture (optional)
+- Battery voltage ADC (PC1)
 
 ## Monitoring/Control
 - GUI: `python tools/event_monitor.py` (connect to 192.168.2.1:8080 AP or STA IP:8080).
@@ -131,6 +131,22 @@ probe-rs attach --chip STM32F722RETx
 **ESC**: Mamba F50_BL32 (BLHeli_32, DShot 300/600/1200, UART6 RX telemetry)
 **Betaflight Target**: MAMBAF722_I2C
 **Config Source**: `local/betaflight/src/config/configs/MAMBAF722_I2C/config.h`
+
+### Hardware Modifications
+
+**OSD Chip Removal (MAX7456/AT7456E):**
+- The onboard OSD chip is desoldered to free up SPI2 pins
+- SPI2 pins are rewired to connect external ADXL373 accelerometer
+- This modification is required as the robot doesn't need video OSD functionality
+- The freed SPI2 bus provides dedicated hardware SPI for the accelerometer
+
+**AT7456E Chip Pin Numbers** (for desoldering reference):
+- Pin 8:  CS (connect to ADXL373 CS)
+- Pin 9:  SDIN/MOSI (connect to ADXL373 SDI)
+- Pin 10: SCLK (connect to ADXL373 SCLK)
+- Pin 11: SDOUT/MISO (connect to ADXL373 SDO)
+
+**Note**: ADXL373 VDD (3.3V) and GND are connected to marked power pins elsewhere on the FC board, not from the OSD chip location.
 
 ### Peripherals
 
@@ -150,9 +166,10 @@ probe-rs attach --chip STM32F722RETx
 
 **SPI**:
 - SPI1 (Onboard MPU6000 gyro): CS=PA4, SCK=PA5, MISO=PA6, MOSI=PA7, EXTI=PC4
-- SPI2 (Onboard MAX7456 OSD): CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15
+- SPI2 (External ADXL373 accelerometer): CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15
+  - Originally connected to MAX7456 OSD (desoldered)
+  - Rewired to ADXL373 accelerometer module
 - SPI3 (Onboard W25Q128FV flash): CS=PA15, SCK=PC10, MISO=PC11, MOSI=PB5
-- Note: ADXL373 accelerometer will need external SPI wiring (use available GPIO)
 
 **I2C**:
 - I2C1: SCL=PB8, SDA=PB9
@@ -170,18 +187,34 @@ probe-rs attach --chip STM32F722RETx
 - PINIO1: PB0
 
 **Onboard Hardware**:
-- Gyroscope: MPU6000 (SPI1)
-- OSD: AT7456E/MAX7456 (SPI2)
+- Gyroscope: MPU6000 (SPI1) - unused
+- OSD: AT7456E/MAX7456 (SPI2) - **REMOVED** (desoldered)
 - Flash: W25Q128FV 128Mbit (SPI3)
 - Barometer: None
 
-**TFA300 Connector Pinout** (JST GH 6-pin):
+**External Hardware**:
+- Accelerometer: ADXL373 (SPI2) - wired to freed OSD pins
+- LIDAR: Benewake TFA300 (UART1 RX)
+- Motors: 2x ESCs via DShot (PC8, PC9)
+- WiFi: UART-to-WiFi adapter (UART4)
+
+**TFA300 LIDAR Connector Pinout** (JST GH 6-pin):
 - Blue: UART_Rx (connects to STM32 TX - unused)
-- Brown: UART_Tx (connects to STM32 RX)
+- Brown: UART_Tx (connects to STM32 RX - UART1 RX=PB7)
 - White: CAN_L (unused)
 - Green: CAN_H (unused)
 - Red: VCC (5V ±10%)
 - Black: GND
+
+**ADXL373 Accelerometer Wiring**:
+- CS:   PB12 (wire to AT7456E pin 8 pad)
+- SCLK: PB13 (wire to AT7456E pin 10 pad)
+- SDO:  PB14 (wire to AT7456E pin 11 pad, MISO from STM32 perspective)
+- SDI:  PB15 (wire to AT7456E pin 9 pad, MOSI from STM32 perspective)
+- VDD:  3.3V (from marked power pin on FC)
+- GND:  GND (from marked ground pin on FC)
+- INT1: Not connected (optional interrupt pin)
+- INT2: Not connected (optional interrupt pin)
 
 ## Dependencies (Cargo.toml)
 - **Shared** (platform-independent): embassy-sync, ringbuffer, static_cell, arrayvec, num-traits, libm, critical-section.
