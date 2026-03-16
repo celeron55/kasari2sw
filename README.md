@@ -108,7 +108,7 @@ cargo run-stm    # Alias for cargo run --target thumbv7em-none-eabihf --features
 probe-rs attach --chip STM32F722RETx
 ```
 
-**Current Status**: Minimal firmware boots and logs heartbeat. **Awaiting Mamba F722APP pinout** to implement:
+**Current Status**: Minimal firmware boots and logs heartbeat. Pinout identified from Betaflight MAMBAF722_I2C target. Ready to implement:
 - Motor PWM outputs
 - LIDAR UART (TFA300 RX)
 - WiFi adapter UART (TX/RX)
@@ -126,17 +126,54 @@ probe-rs attach --chip STM32F722RETx
 
 ## Hardware Pinout (STM32F722 - Mamba F722APP)
 
-**⚠️ TBD - Awaiting official Mamba F722APP schematic/pinout**
+**Board**: Diatone Mamba F722APP MK1 (succeeds F722S)
+**MCU**: STM32F722RET6
+**ESC**: Mamba F50_BL32 (BLHeli_32, DShot 300/600/1200, UART6 RX telemetry)
+**Betaflight Target**: MAMBAF722_I2C
+**Config Source**: `local/betaflight/src/config/configs/MAMBAF722_I2C/config.h`
 
-Expected peripherals (pins to be determined):
-- **Motors**: 2x PWM outputs (likely motor outputs 1-2, TIM3 or TIM4)
-- **LIDAR**: UART RX only (TFA300 @ 115200 baud, likely USART1 or USART6)
-  - **Note**: TFA300 needs NO encoder PWM (unlike old LDS02RR setup)
-- **WiFi Adapter**: UART TX/RX (likely USART2 or USART3)
-- **Accelerometer**: SPI1 (SCK, MISO, MOSI, CS for ADXL373)
-- **RC Receiver**: Timer input capture (PWM measurement, likely TIM1 or TIM2)
-- **Battery**: ADC input (voltage divider)
-- **LED**: Status indicator GPIO
+### Peripherals
+
+**Motors (4x PWM outputs - using 2 for differential drive)**:
+- MOTOR1: PC8 (TIM3_CH3)
+- MOTOR2: PC9 (TIM3_CH4)
+- MOTOR3: PA8 (TIM1_CH1)
+- MOTOR4: PA9 (TIM1_CH2)
+
+**UARTs** (board default connections):
+- UART1: TX=PB6, RX=PB7 (Receiver port - **available, use for LIDAR TFA300**)
+- UART2: TX=PA2, RX=PA3 (Vacant - **available**)
+- UART3: TX=PB10, RX=PB11 (VTX port - **available**, no video transmitter)
+- UART4: TX=PA0, RX=PA1 (**WiFi adapter - connected on board**)
+- UART5: TX=PC12, RX=PD2 (F.Port - **available** unless using F.Port)
+- UART6: TX=PC6, RX=PC7 (RX connected to ESC for telemetry, TX destination unknown)
+
+**SPI**:
+- SPI1 (Onboard MPU6000 gyro): CS=PA4, SCK=PA5, MISO=PA6, MOSI=PA7, EXTI=PC4
+- SPI2 (Onboard MAX7456 OSD): CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15
+- SPI3 (Onboard W25Q128FV flash): CS=PA15, SCK=PC10, MISO=PC11, MOSI=PB5
+- Note: ADXL373 accelerometer will need external SPI wiring (use available GPIO)
+
+**I2C**:
+- I2C1: SCL=PB8, SDA=PB9
+
+**ADC (ADC3)**:
+- VBAT: PC1
+- RSSI: PC2
+- CURR: PC3
+
+**GPIO**:
+- LED0: PC15
+- LED1: PC14
+- BEEPER: PB2 (inverted)
+- LED_STRIP: PB3
+- PINIO1: PB0
+
+**Onboard Hardware**:
+- Gyroscope: MPU6000 (SPI1)
+- OSD: AT7456E/MAX7456 (SPI2)
+- Flash: W25Q128FV 128Mbit (SPI3)
+- Barometer: None
 
 **TFA300 Connector Pinout** (JST GH 6-pin):
 - Blue: UART_Rx (connects to STM32 TX - unused)
