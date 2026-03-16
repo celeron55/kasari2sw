@@ -43,7 +43,220 @@ pub fn compute_checksum(data: &[u8]) -> u8 {
     (data.iter().map(|&b| b as u16).sum::<u16>() & 0xFF) as u8
 }
 
-// TODO: Sensor tasks will be implemented once we have pinout info:
-// - lidar_publisher: async UART RX with DMA for TFA300
-// - accelerometer_task: SPI for ADXL373 (same protocol, different HAL)
-// - rc_receiver_task: Timer input capture for PWM measurement
+// ============================================================================
+// TODO: SENSOR TASKS (awaiting Mamba F722APP pinout)
+// ============================================================================
+
+// TODO: LIDAR Publisher Task
+// Reads TFA300 packets from UART RX (with DMA) and publishes Lidar events
+//
+// #[embassy_executor::task]
+// pub async fn lidar_publisher(
+//     mut uart_rx: embassy_stm32::usart::UartRx<'static>,
+//     event_channel: &'static crate::shared::EventChannel,
+// ) {
+//     use crate::shared::kasari::InputEvent;
+//
+//     let publisher = event_channel.publisher().unwrap();
+//     let mut buffer = [0u8; PACKET_SIZE * 8];  // Buffer for multiple packets
+//     let mut pos = 0;
+//
+//     loop {
+//         // Read data asynchronously with DMA
+//         match uart_rx.read(&mut buffer[pos..]).await {
+//             Ok(n) => {
+//                 pos += n;
+//
+//                 // Parse complete packets
+//                 while pos >= PACKET_SIZE {
+//                     // Look for header bytes
+//                     if buffer[0] == HEAD_BYTE_1 && buffer[1] == HEAD_BYTE_2 {
+//                         if let Some(parsed) = parse_packet(&buffer[0..PACKET_SIZE]) {
+//                             // Get timestamp (microseconds)
+//                             let ts = embassy_time::Instant::now().as_micros() as u64;
+//
+//                             // Process distance with offset
+//                             let d = parsed.distances[0];
+//                             let d_processed = process_raw_lidar_distance(d);
+//
+//                             // Publish event (TFA300 gives 1 distance, replicate 4x)
+//                             let event = InputEvent::Lidar(
+//                                 ts,
+//                                 d_processed,
+//                                 d_processed,
+//                                 d_processed,
+//                                 d_processed,
+//                             );
+//                             publisher.publish_immediate(event);
+//                         }
+//                         // Shift buffer
+//                         buffer.copy_within(PACKET_SIZE.., 0);
+//                         pos -= PACKET_SIZE;
+//                     } else {
+//                         // Bad header, skip one byte
+//                         buffer.copy_within(1.., 0);
+//                         pos -= 1;
+//                     }
+//                 }
+//             }
+//             Err(_) => {
+//                 // UART error, reset
+//                 pos = 0;
+//             }
+//         }
+//     }
+// }
+
+// TODO: Distance processing function (apply offset)
+// fn process_raw_lidar_distance(raw_mm: u16) -> u16 {
+//     if raw_mm == 0 {
+//         return 0;
+//     }
+//     let offset_mm = LIDAR_DISTANCE_OFFSET;
+//     let adjusted = raw_mm as f32 + offset_mm;
+//     adjusted.max(0.0) as u16
+// }
+
+// TODO: Accelerometer Task
+// Reads ADXL373 via SPI and publishes Accelerometer events
+// Protocol is same as ESP32 version, just different HAL
+//
+// #[embassy_executor::task]
+// pub async fn accelerometer_task(
+//     mut spi: embassy_stm32::spi::Spi<'static, embassy_stm32::mode::Blocking>,
+//     mut cs: embassy_stm32::gpio::Output<'static>,
+//     event_channel: &'static crate::shared::EventChannel,
+// ) {
+//     use crate::shared::kasari::InputEvent;
+//     use embassy_time::{Timer, Duration};
+//
+//     let publisher = event_channel.publisher().unwrap();
+//
+//     cs.set_high();
+//     Timer::after_millis(10).await;
+//
+//     // Read device ID to verify connection (should be 0xAD)
+//     cs.set_low();
+//     let mut buf = [(0x00 << 1) | 1, 0];  // DEVID_AD register
+//     spi.blocking_transfer_in_place(&mut buf).unwrap();
+//     cs.set_high();
+//     defmt::info!("ADXL373 DEVID_AD = {:#02x} (should be 0xAD)", buf[1]);
+//
+//     // Configure power control: measurement mode, full bandwidth
+//     cs.set_low();
+//     let mut buf = [(0x2D << 1) | 0, 0b00000010];  // POWER_CTL register
+//     spi.blocking_transfer_in_place(&mut buf).unwrap();
+//     cs.set_high();
+//     Timer::after_millis(10).await;
+//
+//     loop {
+//         // Read X, Y, Z data (12-bit signed, 0.2G per LSB)
+//         cs.set_low();
+//         let mut buf = [(0x08 << 1) | 1, 0, 0, 0, 0, 0, 0];  // XDATA register
+//         spi.blocking_transfer_in_place(&mut buf).unwrap();
+//         cs.set_high();
+//
+//         // Parse 12-bit signed values
+//         let x_raw = (((buf[1] as i16) << 8) | buf[2] as i16) >> 4;
+//         let y_raw = (((buf[3] as i16) << 8) | buf[4] as i16) >> 4;
+//         let z_raw = (((buf[5] as i16) << 8) | buf[6] as i16) >> 4;
+//
+//         // Convert to G (0.2G per LSB)
+//         let x_g = x_raw as f32 * 0.2;
+//         let y_g = y_raw as f32 * 0.2;
+//         let z_g = z_raw as f32 * 0.2;
+//
+//         // Publish event (note: axes may need remapping based on mounting)
+//         let timestamp = embassy_time::Instant::now().as_micros() as u64;
+//         let event = InputEvent::Accelerometer(timestamp, -y_g, -z_g);
+//         publisher.publish_immediate(event);
+//
+//         // Sample at ~100 Hz
+//         Timer::after_millis(10).await;
+//     }
+// }
+
+// TODO: RC Receiver Task
+// Measures PWM pulse width using timer input capture
+// Publishes Receiver events for mode switching
+//
+// #[embassy_executor::task]
+// pub async fn rc_receiver_task(
+//     mut capture: embassy_stm32::timer::input_capture::InputCapture<'static>,
+//     event_channel: &'static crate::shared::EventChannel,
+// ) {
+//     use crate::shared::kasari::InputEvent;
+//     use embassy_stm32::timer::input_capture::Channel;
+//     use embassy_time::Duration;
+//
+//     let publisher = event_channel.publisher().unwrap();
+//
+//     loop {
+//         // Wait for rising edge
+//         match embassy_time::with_timeout(
+//             Duration::from_millis(100),
+//             capture.wait_for_rising_edge(Channel::Ch1)
+//         ).await {
+//             Ok(Ok(())) => {
+//                 // Capture start time
+//                 let start = capture.get_capture(Channel::Ch1);
+//
+//                 // Wait for falling edge
+//                 if let Ok(Ok(())) = embassy_time::with_timeout(
+//                     Duration::from_millis(50),
+//                     capture.wait_for_falling_edge(Channel::Ch1)
+//                 ).await {
+//                     // Capture end time
+//                     let end = capture.get_capture(Channel::Ch1);
+//
+//                     // Calculate pulse width in microseconds
+//                     let pulse_width_us = end.wrapping_sub(start) as f32;
+//
+//                     // Publish event
+//                     let timestamp = embassy_time::Instant::now().as_micros() as u64;
+//                     let event = InputEvent::Receiver(timestamp, 0, Some(pulse_width_us));
+//                     publisher.publish_immediate(event);
+//                 }
+//             }
+//             Err(_) => {
+//                 // Timeout - no signal
+//                 let timestamp = embassy_time::Instant::now().as_micros() as u64;
+//                 let event = InputEvent::Receiver(timestamp, 0, None);
+//                 publisher.publish_immediate(event);
+//             }
+//         }
+//     }
+// }
+
+// TODO: Battery Voltage Monitor Task
+// Reads ADC and publishes VBat events
+//
+// #[embassy_executor::task]
+// pub async fn battery_monitor_task(
+//     mut adc: embassy_stm32::adc::Adc<'static, embassy_stm32::mode::Blocking>,
+//     vbat_pin: impl embassy_stm32::adc::AdcChannel<embassy_stm32::peripherals::ADC1>,
+//     event_channel: &'static crate::shared::EventChannel,
+// ) {
+//     use crate::shared::kasari::InputEvent;
+//     use embassy_time::{Timer, Duration};
+//
+//     let publisher = event_channel.publisher().unwrap();
+//
+//     loop {
+//         // Read ADC value
+//         let raw = adc.blocking_read(&mut vbat_pin);
+//
+//         // Convert to voltage (calibration needed for specific voltage divider)
+//         // Original ESP32: (4095 - raw) * 0.01045
+//         // STM32 ADC is 12-bit (0-4095), calibration will differ
+//         let voltage = raw as f32 * 0.01;  // TBD: needs calibration
+//
+//         // Publish event
+//         let timestamp = embassy_time::Instant::now().as_micros() as u64;
+//         let event = InputEvent::VBat(timestamp, voltage);
+//         publisher.publish_immediate(event);
+//
+//         // Sample at 10 Hz
+//         Timer::after_millis(100).await;
+//     }
+// }
