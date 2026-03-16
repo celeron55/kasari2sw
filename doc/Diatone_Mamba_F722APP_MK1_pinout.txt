@@ -1,0 +1,122 @@
+Diatone Mamba F722APP MK1 - Original Betaflight Pinout
+======================================================
+Source: Betaflight firmware config MAMBAF722_I2C
+MCU: STM32F722RET6 (LQFP64 package)
+Manufacturer ID: DIAT (Diatone)
+
+Board Specifications:
+=====================
+- Flight Controller: Mamba F722 APP (Application board)
+- Variant: MK1 (Mark 1, original version)
+- Gyroscope: MPU6000 or MPU6500 (SPI)
+- OSD: MAX7456 (AT7456E compatible, SPI)
+- Flash: W25Q128FV 128Mbit (SPI)
+- Barometer: Optional BMP280/DPS310 (I2C)
+- Target Name: MAMBAF722_I2C
+
+Motor Outputs (DShot capable):
+===============================
+MOTOR1: PC8 (TIM3_CH3, timer output 1, DMA channel 0)
+MOTOR2: PC9 (TIM3_CH4, timer output 2, DMA channel 0)
+MOTOR3: PA8 (TIM1_CH1, timer output 3, DMA channel 0)
+MOTOR4: PA9 (TIM1_CH2, timer output 4, DMA channel 0)
+
+Additional Timer Outputs:
+=========================
+Timer 0: PB9 (not assigned to motor, DMA -1)
+Timer 5: PB8 (I2C1_SCL, conflicts with I2C)
+Timer 6: PB3 (LED_STRIP)
+
+UARTs (6 available):
+====================
+UART1: TX=PB6, RX=PB7 (typically RC receiver)
+UART2: TX=PA2, RX=PA3 (vacant pad)
+UART3: TX=PB10, RX=PB11 (typically VTX control)
+UART4: TX=PA0, RX=PA1 (WiFi adapter on APP board)
+UART5: TX=PC12, RX=PD2 (typically F.Port)
+UART6: TX=PC6, RX=PC7 (ESC telemetry)
+
+SPI Buses:
+==========
+SPI1 (Gyroscope):
+  SCK:  PA5
+  MISO: PA6 (SDI in config)
+  MOSI: PA7 (SDO in config)
+  CS:   PA4 (GYRO_1_CS_PIN)
+  EXTI: PC4 (interrupt from gyro)
+  Device: MPU6000/MPU6500
+  Orientation: CW180_DEG (rotated 180 degrees)
+
+SPI2 (OSD):
+  SCK:  PB13
+  MISO: PB14 (SDI in config)
+  MOSI: PB15 (SDO in config)
+  CS:   PB12 (MAX7456_SPI_CS_PIN)
+  Device: MAX7456 (AT7456E)
+
+SPI3 (Flash):
+  SCK:  PC10
+  MISO: PC11 (SDI in config)
+  MOSI: PB5 (SDO in config)
+  CS:   PA15 (FLASH_CS_PIN)
+  Device: W25Q128FV (128Mbit)
+
+I2C Buses:
+==========
+I2C1:
+  SCL: PB8
+  SDA: PB9
+  Devices: Optional barometer (BMP280/DPS310), magnetometer
+
+ADC Inputs (ADC3):
+==================
+VBAT: PC1 (ADC3_IN11, battery voltage)
+RSSI: PC2 (ADC3_IN12, receiver signal strength)
+CURR: PC3 (ADC3_IN13, current sensor)
+
+GPIO:
+=====
+LED0:       PC15 (status LED)
+LED1:       PC14 (status LED)
+BEEPER:     PB2 (inverted logic)
+LED_STRIP:  PB3 (WS2812B addressable LEDs)
+PINIO1:     PB0 (programmable IO, box 0, config 129)
+
+Default Configuration:
+======================
+Blackbox: FLASH (onboard W25Q128FV)
+DShot: DSHOT_DMAR_ON (DMA burst mode enabled)
+Current meter: ADC (PC3)
+Voltage meter: ADC (PC1)
+
+Physical Connectors (typical board layout):
+============================================
+UART1: RC Receiver input (servo PWM or SBUS/CRSF)
+UART2: Vacant solder pads
+UART3: VTX control (SmartAudio/Tramp)
+UART4: WiFi adapter (ESP8266/ESP32 module on APP variant)
+UART5: F.Port (FrSky bidirectional protocol)
+UART6: ESC telemetry (connects to 4-in-1 ESC)
+
+Motor pads: M1-M4 (supports DShot150/300/600/1200)
+Power: VBAT, 5V, 3.3V, GND pads
+I2C: SCL/SDA pads for external sensors/OSD
+
+Board Variants:
+===============
+- Mamba F722 (base model): 4 motors, MPU6000, no barometer
+- Mamba F722 I2C (this config): 4 motors, MPU6000/MPU6500, I2C for baro
+- Mamba F722 2022A: 8 motors, BMI270, barometer
+- Mamba F722 2022B: 8 motors, ICM42688P, barometer
+- Mamba F722 X8: 8 motors, MPU6000, barometer
+
+Notes:
+======
+- The APP (Application) variant includes an integrated WiFi adapter on UART4
+- Board supports both MPU6000 and MPU6500 gyroscopes (auto-detect)
+- DShot burst DMA mode enables faster motor update rates
+- PINIO1 can be configured as camera control, VTX power, etc.
+- Beeper uses inverted logic (active low)
+- I2C pins (PB8/PB9) conflict with timer outputs - choose one or the other
+- LED_STRIP on PB3 conflicts with JTAG (disable JTAG if using LED strip)
+- Gyro rotation is 180° from default orientation
