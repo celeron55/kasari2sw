@@ -1,0 +1,13 @@
+[target.xtensa-esp32-none-elf]
+runner = "espflash flash --monitor --chip esp32"
+rustflags = [
+  "-C", "link-arg=-nostartfiles",
+]
+
+[unstable]
+build-std = ["alloc", "core"]
+
+[alias]
+build-pc = ["build", "--features", "pc"]
+build-esp = ["build", "--target", "xtensa-esp32-none-elf", "--features", "esp"]
+run-esp = ["run", "--target", "xtensa-esp32-none-elf", "--features", "esp", "--bin", "kasarisw"]
