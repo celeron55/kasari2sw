@@ -52,10 +52,8 @@ the robot over wifi.
 - `src/simulator/events.rs`: Event parsing from JSON logs.
 - `src/simulator/physics.rs`: Virtual world raycasting, robot physics.
 - `src/simulator/sources.rs`: Event sources (file replay or simulation).
-- `tools/event_monitor.py`: Tkinter GUI for monitoring/controls/logging.
-- `tools/download_events.py`: CLI for downloading events from robot's flash storage.
-- `tools/parse_events.py`: CLI binary event parser to JSON.
-- `tools/combat_wizard.py`: Tkinter GUI for combat workflow. Combines event_monitor.py and download_events.py functionalities into one tool.
+- `tools/event_monitor.py`: Tkinter GUI for monitoring/controls/logging (outdated - unmodified copy from kasarisw ESP32 version).
+- `tools/tfa300.py`: TFA300 LIDAR configuration and real-time 10kHz data plotting tool with min/max/avg visualization.
 - `rust-toolchain.toml`: Specifies stable Rust toolchain (target: thumbv7em-none-eabihf for STM32F722).
 - `.cargo/config.toml`: Cargo config with probe-rs runner, build aliases (build-pc, build-stm, run-stm).
 
@@ -117,11 +115,7 @@ probe-rs attach --chip STM32F722RETx
 - Battery voltage ADC (PC1)
 
 ## Monitoring/Control
-- GUI: `python tools/event_monitor.py` (connect to 192.168.2.1:8080 AP or STA IP:8080).
-  - Features: View sensors/planner, toggle modes (1=manual sliders, 2=autonomous), auto-log JSON.
-- CLI Download: `python tools/download_events.py [IP:PORT]` (defaults to
-  192.168.1.248:8081; downloads flash-stored events, splits into JSON logs).
-- CLI: `nc IP 8080 | python tools/parse_events.py > log.json`.
+- **Note**: Monitoring tools are outdated and from the ESP32 version. Need updating for STM32F722.
 - Events: Binary (tag XOR 0x5555 + payload) over TCP; JSON in logs.
 
 ## Hardware Pinout (STM32F722 - Mamba F722APP)
