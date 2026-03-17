@@ -16,9 +16,8 @@ extern crate alloc;
 use core::alloc::Layout;
 
 mod sensors;
-mod shared;
-
-use shared::kasari;
+use kasarisw::shared;
+use kasarisw::shared::kasari;
 
 // Global allocator for STM32
 #[global_allocator]

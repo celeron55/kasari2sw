@@ -5,7 +5,7 @@ version = "0.1.0"
 
 [[bin]]
 name = "kasarisw"
-path = "src/embedded.rs"
+path = "src/platform/stm32/mod.rs"
 required-features = ["stm32"]
 
 [[bin]]
