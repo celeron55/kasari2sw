@@ -9,6 +9,7 @@ mod logging;
 use log::info;
 use cyw43_pio::PioSpi;
 use embassy_executor::Spawner;
+use embassy_net::{Config as NetConfig, Ipv4Cidr, Stack, StackResources};
 use embassy_rp::{
     bind_interrupts,
     gpio::{Level, Output},
@@ -24,6 +25,8 @@ extern crate alloc;
 const AP_SSID: &str = "kasari2";
 const AP_PASSWORD: &str = "kissa123";
 const AP_CHANNEL: u8 = 1;
+
+const IP_ADDR: u8 = 1;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -78,9 +81,21 @@ async fn main(spawner: Spawner) {
 
     static STATE: StaticCell<cyw43::State> = StaticCell::new();
     let state = STATE.init(cyw43::State::new());
-    let (_net_device, mut control, runner) = cyw43::new(state, pwr, spi, MODEM_FIRMWARE).await;
+    let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, MODEM_FIRMWARE).await;
 
     spawner.spawn(wifi_task(runner)).unwrap();
+
+    // Initialize network stack with static IP
+    let config = NetConfig::ipv4_static(embassy_net::StaticConfigV4 {
+        address: Ipv4Cidr::new(embassy_net::Ipv4Address::new(192, 168, 1, IP_ADDR), 24),
+        gateway: None,
+        dns_servers: heapless::Vec::new(),
+    });
+    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+    let seed = 12345;
+    let (stack, runner) = embassy_net::new(net_device, config, RESOURCES.init(StackResources::new()), seed);
+
+    spawner.spawn(net_task(runner)).unwrap();
 
     control.init(COUNTRY_LOCALE_MATRIX).await;
     control.set_power_management(cyw43::PowerManagementMode::PowerSave).await;
@@ -96,6 +111,10 @@ async fn main(spawner: Spawner) {
         control.start_ap_wpa2(AP_SSID, AP_PASSWORD, AP_CHANNEL).await;
         info!("AP started (WPA2)");
     }
+
+    // Wait for network to be ready
+    stack.wait_config_up().await;
+    info!("Network ready! IP: 192.168.1.{}", IP_ADDR);
 
     // Initialize UART0 for logging (115200 baud) - buffered for non-blocking
     static UART0_TX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
@@ -154,5 +173,10 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn wifi_task(runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>) -> ! {
+    runner.run().await
+}
+
+#[embassy_executor::task]
+async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'static>>) -> ! {
     runner.run().await
 }
