@@ -5,6 +5,13 @@ rustflags = [
   "-C", "link-arg=-Tdefmt.x",
 ]
 
+[target.thumbv8m.main-none-eabihf]
+runner = "probe-rs run --chip RP2350"
+rustflags = [
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
 [unstable]
 build-std = ["core", "alloc"]
 
@@ -12,3 +19,5 @@ build-std = ["core", "alloc"]
 build-pc = ["build", "--features", "pc"]
 build-stm = ["build", "--target", "thumbv7em-none-eabihf", "--features", "stm32"]
 run-stm = ["run", "--target", "thumbv7em-none-eabihf", "--features", "stm32", "--bin", "kasarisw"]
+build-rp = ["build", "--target", "thumbv8m.main-none-eabihf", "--features", "rp2350"]
+run-rp = ["run", "--target", "thumbv8m.main-none-eabihf", "--features", "rp2350", "--bin", "kasarisw-rp2350"]
