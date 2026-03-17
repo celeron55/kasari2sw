@@ -3,23 +3,30 @@
 
 mod pins;
 mod sensors;
+mod logging;
 // mod motors;
 
+use log::info;
 use cyw43_pio::PioSpi;
 use embassy_executor::Spawner;
 use embassy_rp::{
     bind_interrupts,
     gpio::{Level, Output},
-    peripherals::{PIO0, DMA_CH0, UART1},
+    peripherals::{PIO0, DMA_CH0, UART1, UART0},
     pio::{self, Pio},
-    uart::{Uart, Config as UartConfig, InterruptHandler as UartInterruptHandler},
+    uart::{BufferedUart, Config as UartConfig, BufferedInterruptHandler},
 };
 use embassy_time::Timer;
 use static_cell::StaticCell;
-use defmt::*;
-use {defmt_rtt as _, panic_probe as _};
 
 extern crate alloc;
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {
+        cortex_m::asm::wfi();
+    }
+}
 
 #[link_section = ".modem_firmware"]
 static MODEM_FIRMWARE: &[u8] = include_bytes!("../../../cyw43-firmware/43439A0.bin");
@@ -29,7 +36,8 @@ static COUNTRY_LOCALE_MATRIX: &[u8] = include_bytes!("../../../cyw43-firmware/43
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
-    UART1_IRQ => UartInterruptHandler<UART1>;
+    UART0_IRQ => BufferedInterruptHandler<UART0>;
+    UART1_IRQ => BufferedInterruptHandler<UART1>;
 });
 
 #[global_allocator]
@@ -44,8 +52,6 @@ async fn main(spawner: Spawner) {
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { ALLOCATOR.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
     }
-
-    info!("Kasari2sw RP2350 Pico 2 W starting...");
 
     let p = embassy_rp::init(Default::default());
 
@@ -77,29 +83,44 @@ async fn main(spawner: Spawner) {
 
     info!("CYW43 initialized");
 
-    use embassy_rp::peripherals::DMA_CH1;
+    // Initialize UART0 for logging (115200 baud) - buffered for non-blocking
+    static UART0_TX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
+    static UART0_RX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
+    
+    let mut uart0_config = UartConfig::default();
+    uart0_config.baudrate = 115200;
+    let uart0 = BufferedUart::new(
+        p.UART0,
+        p.PIN_16,  // TX
+        p.PIN_17,  // RX
+        Irqs,
+        UART0_TX_BUFFER.init([0; 256]),
+        UART0_RX_BUFFER.init([0; 256]),
+        uart0_config,
+    );
+    let (uart0_tx, _uart0_rx) = uart0.split();
+    
+    // Initialize logger - logs go to UART0 via BufferedUartTx
+    logging::init_logger(uart0_tx);
+    info!("Logger initialized - logs streaming to UART0 (GP16 TX, 115200 baud, buffered)");
+    info!("TCP log server not yet implemented - requires embassy-net WiFi integration");
 
-    // Initialize DMA UART1 for LIDAR (921600 baud)
+    // Initialize buffered UART1 for LIDAR (921600 baud)
+    static UART1_TX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
+    static UART1_RX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
+    
     let mut uart_config = UartConfig::default();
     uart_config.baudrate = 921600;
-    // TODO: BufferedUart is probably better
-    let uart = Uart::new(
+    let uart = BufferedUart::new(
         p.UART1,
         p.PIN_4,  // TX
         p.PIN_5,  // RX
         Irqs,
-        p.DMA_CH1,
-        p.DMA_CH2,
+        UART1_TX_BUFFER.init([0; 256]),
+        UART1_RX_BUFFER.init([0; 256]),
         uart_config,
     );
     let (_tx, rx) = uart.split();
-
-    // Initialize motors (TODO: fix PWM API)
-    // let motors = motors::MotorController::new(
-    //     p.PWM_SLICE0,
-    //     p.PIN_0,
-    //     p.PIN_1,
-    // );
 
     info!("Peripherals initialized, starting LIDAR task");
 
