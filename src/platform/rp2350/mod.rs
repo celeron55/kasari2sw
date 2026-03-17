@@ -1,19 +1,36 @@
 #![no_std]
 #![no_main]
 
+use cyw43_pio::PioSpi;
 use embassy_executor::Spawner;
-use embassy_rp::gpio::{Level, Output};
+use embassy_rp::{
+    bind_interrupts,
+    gpio::{Level, Output},
+    peripherals::{PIO0, DMA_CH0},
+    pio::{self, Pio},
+};
 use embassy_time::Timer;
+use static_cell::StaticCell;
 use defmt::*;
 use {defmt_rtt as _, panic_probe as _};
 
 extern crate alloc;
 
+#[link_section = ".modem_firmware"]
+static MODEM_FIRMWARE: &[u8] = include_bytes!("../../../cyw43-firmware/43439A0.bin");
+
+#[link_section = ".modem_firmware"]
+static COUNTRY_LOCALE_MATRIX: &[u8] = include_bytes!("../../../cyw43-firmware/43439A0_clm.bin");
+
+bind_interrupts!(struct Irqs {
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+});
+
 #[global_allocator]
 static ALLOCATOR: embedded_alloc::Heap = embedded_alloc::Heap::empty();
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     // Initialize heap (RP2350 has 520KB SRAM)
     {
         use core::mem::MaybeUninit;
@@ -26,25 +43,49 @@ async fn main(_spawner: Spawner) {
 
     let p = embassy_rp::init(Default::default());
 
-    info!("RP2350 initialized");
+    // Initialize CYW43 WiFi chip (controls onboard LED)
+    let pwr = Output::new(p.PIN_23, Level::Low);
+    let cs = Output::new(p.PIN_25, Level::High);
+    let mut pio = Pio::new(p.PIO0, Irqs);
 
-    // Simple GPIO LED blink test on GP21
-    let mut led = Output::new(p.PIN_21, Level::Low);
+    const CLOCK_DIVIDER: u16 = 78; // ~1.6MHz SPI clock for CYW43
+    let spi = PioSpi::new(
+        &mut pio.common,
+        pio.sm0,
+        CLOCK_DIVIDER.into(),
+        pio.irq0,
+        cs,
+        p.PIN_24,
+        p.PIN_29,
+        p.DMA_CH0,
+    );
 
-    info!("Starting LED blink test on GP21");
+    static STATE: StaticCell<cyw43::State> = StaticCell::new();
+    let state = STATE.init(cyw43::State::new());
+    let (_net_device, mut control, runner) = cyw43::new(state, pwr, spi, MODEM_FIRMWARE).await;
 
-    // Blink LED
+    // Spawn WiFi task (required for CYW43 to function)
+    spawner.spawn(wifi_task(runner)).unwrap();
+
+    // Initialize CYW43
+    control.init(COUNTRY_LOCALE_MATRIX).await;
+    control.set_power_management(cyw43::PowerManagementMode::PowerSave).await;
+
+    info!("CYW43 initialized, LED ready");
+
+    // Blink onboard LED (GPIO 0 on CYW43)
     loop {
         info!("LED on");
-        led.set_high();
+        control.gpio_set(0, true).await;
         Timer::after_millis(500).await;
 
         info!("LED off");
-        led.set_low();
+        control.gpio_set(0, false).await;
         Timer::after_millis(500).await;
     }
 }
 
-// TODO: CYW43 WiFi initialization will be added in Phase 6
-// The Pico 2 W uses CYW43439 for WiFi and the onboard LED.
-// For now, we're using a simple GPIO pin to verify basic firmware works.
+#[embassy_executor::task]
+async fn wifi_task(runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>) -> ! {
+    runner.run().await
+}
