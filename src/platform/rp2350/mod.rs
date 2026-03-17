@@ -4,7 +4,7 @@
 mod pins;
 mod sensors;
 mod logging;
-// mod motors;
+mod log_server;
 
 use log::info;
 use cyw43_pio::PioSpi;
@@ -115,6 +115,9 @@ async fn main(spawner: Spawner) {
     // Wait for network to be ready
     stack.wait_config_up().await;
     info!("Network ready! IP: 192.168.1.{}", IP_ADDR);
+
+    // Start TCP server
+    log_server::start_log_server(&spawner, stack).await;
 
     // Initialize UART0 for logging (115200 baud) - buffered for non-blocking
     static UART0_TX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
