@@ -24,7 +24,7 @@ required-features = ["rp2350"]
 [features]
 stm32 = ["dep:defmt", "dep:embassy-stm32", "dep:embassy-net"]
 pc = ["critical-section/std"]
-rp2350 = ["dep:log", "dep:embassy-rp", "dep:cyw43", "dep:cyw43-pio"]
+rp2350 = ["dep:log", "dep:embassy-rp", "dep:cyw43", "dep:cyw43-pio", "dep:embassy-net"]
 
 [dependencies]
 critical-section = "1.2.0"

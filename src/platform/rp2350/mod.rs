@@ -21,6 +21,10 @@ use static_cell::StaticCell;
 
 extern crate alloc;
 
+const AP_SSID: &str = "kasari2";
+const AP_PASSWORD: &str = "kissa123";
+const AP_CHANNEL: u8 = 1;
+
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {
@@ -83,6 +87,16 @@ async fn main(spawner: Spawner) {
 
     info!("CYW43 initialized");
 
+    // Start WiFi Access Point
+    info!("Starting AP: {} on channel {}", AP_SSID, AP_CHANNEL);
+    if AP_PASSWORD.is_empty() {
+        control.start_ap_open(AP_SSID, AP_CHANNEL).await;
+        info!("AP started (open)");
+    } else {
+        control.start_ap_wpa2(AP_SSID, AP_PASSWORD, AP_CHANNEL).await;
+        info!("AP started (WPA2)");
+    }
+
     // Initialize UART0 for logging (115200 baud) - buffered for non-blocking
     static UART0_TX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
     static UART0_RX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
@@ -103,7 +117,6 @@ async fn main(spawner: Spawner) {
     // Initialize logger - logs go to UART0 via BufferedUartTx
     logging::init_logger(uart0_tx);
     info!("Logger initialized - logs streaming to UART0 (GP0 TX, GP1 RX, 115200 baud, buffered)");
-    info!("TCP log server not yet implemented - requires embassy-net WiFi integration");
 
     // Initialize buffered UART1 for LIDAR (921600 baud)
     static UART1_TX_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
