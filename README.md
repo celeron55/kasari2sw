@@ -121,6 +121,15 @@ probe-rs attach --chip STM32F722RETx
 - Battery voltage ADC (PC1)
 
 ### Embedded Firmware (RP2350)
+Copy FYW43 firmware to `cyw43-firmware` so that you have this (e.g. from
+https://github.com/ninjasource/rp-pico2w-examples):
+```
+cyw43-firmware
+|-- 43439A0.bin
+|-- 43439A0_btfw.bin
+`-- 43439A0_clm.bin
+```
+
 ```sh
 cargo build-rp  # Alias for cargo build --target thumbv8m.main-none-eabihf --features rp2350
                 # Builds firmware for Raspberry Pi Pico 2 W (RP2350)
