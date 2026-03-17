@@ -28,10 +28,10 @@ async fn main(_spawner: Spawner) {
 
     info!("RP2350 initialized");
 
-    // Simple GPIO LED blink test on GP25 (near onboard LED location)
-    let mut led = Output::new(p.PIN_25, Level::Low);
+    // Simple GPIO LED blink test on GP21
+    let mut led = Output::new(p.PIN_21, Level::Low);
 
-    info!("Starting LED blink test on GP25");
+    info!("Starting LED blink test on GP21");
 
     // Blink LED
     loop {

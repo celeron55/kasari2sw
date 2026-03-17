@@ -8,13 +8,11 @@ navigation and object following/wall avoidance in a robot which spins its body
 directional movement through differential motor RPM modulation. It used an
 ESP-WROOM-32 module to run the firmware.
 
-Kasari2sw upgrades the LIDAR to a Benewake TFA300 (UART interface) and the MCU
-to a STM32F722RET6, more specifically the Diatone Mamba F722APP WiFi Flight
-Controller (FC), which was originally designed to run Betaflight. This firmware
-completely replaces Betaflight and changes the function and purpose of the FC
-board.
+Kasari2sw upgrades the LIDAR to a Benewake TFA300 (UART interface) and supports
+two MCU platforms: STM32F722RET6 (Diatone Mamba F722APP WiFi FC) and RP2350
+(Raspberry Pi Pico 2 W). The STM32 firmware completely replaces Betaflight.
 
-- **Firmware**: STM32F7-based, handles sensors, motion planning, UART event streaming (the FC integrates a UART-to-WiFi adapter).
+- **Firmware**: Multi-platform (STM32F722 or RP2350), handles sensors, motion planning, WiFi event streaming.
 - **Simulator**: PC GUI (egui) for log replay or virtual world simulation; visualizes LIDAR points, detections, behavior and collisions.
 - **Shared Logic**: LIDAR/accel processing, binning (90 bins, 4° each), object detection (walls/objects via averages/dips).
 - **Python GUI**: `event_monitor.py` for real-time monitoring, logging (JSON), controls over TCP.
@@ -43,8 +41,9 @@ logic data (e.g., detector, plans) uniformly, avoiding duplication. Flags like
 the robot over wifi.
 
 ## Project Structure
-- `src/embedded.rs`: STM32F7 firmware entrypoint.
-- `src/sensors.rs`: Sensor tasks (TFA300 LIDAR UART parsing, ADXL373 accel SPI, RC PWM capture).
+- `src/platform/stm32/mod.rs`: STM32F722 firmware entrypoint.
+- `src/platform/stm32/sensors.rs`: STM32 sensor tasks (TFA300 LIDAR UART parsing, ADXL373 accel SPI, RC PWM capture).
+- `src/platform/rp2350/mod.rs`: RP2350 (Pico 2 W) firmware entrypoint.
 - `src/shared/mod.rs`: Core logic (MainLogic, MotorModulator, event handling) - **platform-independent**.
 - `src/shared/algorithm.rs`: ObjectDetector (binning, RPM from accel, detection via window averages/large changes) - **platform-independent**.
 - `src/simulator/mod.rs`: Simulator entrypoint.
@@ -54,8 +53,9 @@ the robot over wifi.
 - `src/simulator/sources.rs`: Event sources (file replay or simulation).
 - `tools/event_monitor.py`: Tkinter GUI for monitoring/controls/logging (outdated - unmodified copy from kasarisw ESP32 version).
 - `tools/tfa300.py`: TFA300 LIDAR configuration and real-time 10kHz data plotting tool with min/max/avg visualization.
-- `rust-toolchain.toml`: Specifies stable Rust toolchain (target: thumbv7em-none-eabihf for STM32F722).
-- `.cargo/config.toml`: Cargo config with probe-rs runner, build aliases (build-pc, build-stm, run-stm).
+- `rust-toolchain.toml`: Specifies stable Rust toolchain (targets: thumbv7em-none-eabihf for STM32F722, thumbv8m.main-none-eabihf for RP2350).
+- `.cargo/config.toml`: Cargo config with probe-rs runner, build aliases (build-pc, build-stm, run-stm, build-rp, run-rp).
+- `memory.x`: Linker script for RP2350 memory layout (4MB flash, 520KB RAM, image definition sections).
 
 ## Key Algorithms
 - **RPM from Accel**: `a_calibrated = accel_g - offset; omega = sqrt(|a| / r); rpm = (omega * 60) / (2π)` (r=0.0145m).
@@ -65,20 +65,26 @@ the robot over wifi.
 - **Autonomous**: Blend vectors: away from wall + toward open/object; clamp mag 0.5-1.0.
 
 ## Prerequisites
-- Rust stable (configured via rust-toolchain.toml for STM32 ARM Cortex-M7 target).
+- Rust stable (configured via rust-toolchain.toml for STM32 Cortex-M7 and RP2350 Cortex-M33 targets).
 - PC: No special setup for simulator.
-- Embedded: Python 3 (tkinter for tools); install probe-rs for flashing:
-  ```sh
-  cargo install probe-rs-tools --locked
-  rustup target add thumbv7em-none-eabihf
-  ```
-- Hardware:
-  - **MCU**: STM32F722RET6 (Diatone Mamba F722APP Flight Controller)
-  - **LIDAR**: Benewake TFA300 (UART @ 115200 baud, no encoder needed)
+- Embedded: Python 3 (tkinter for tools).
+  - **STM32F722**: Install probe-rs for debugging/flashing:
+    ```sh
+    cargo install probe-rs-tools --locked
+    rustup target add thumbv7em-none-eabihf
+    ```
+  - **RP2350**: Install elf2uf2-rs for UF2 generation:
+    ```sh
+    cargo install --git https://github.com/JoNil/elf2uf2-rs --force
+    rustup target add thumbv8m.main-none-eabihf
+    ```
+- Hardware (two platform options):
+  - **MCU Option 1**: STM32F722RET6 (Diatone Mamba F722APP Flight Controller with UART-to-WiFi adapter)
+  - **MCU Option 2**: RP2350 (Raspberry Pi Pico 2 W with integrated CYW43439 WiFi)
+  - **LIDAR**: Benewake TFA300 (UART @ 921600 baud for RP2350, 115200 for STM32)
   - **Accelerometer**: ADXL373 (SPI)
-  - **Motors**: 2x ESCs (400 Hz PWM)
-  - **Battery**: LiPo (ADC voltage monitoring)
-  - **WiFi**: FC-integrated UART-to-WiFi adapter
+  - **Motors**: 2x ESCs (400 Hz PWM, DShot on STM32)
+  - **Battery**: LiPo (ADC voltage monitoring with divider)
 
 ## Build/Run
 ### PC Simulator
@@ -113,6 +119,55 @@ probe-rs attach --chip STM32F722RETx
 - Accelerometer SPI (ADXL373 on SPI2: CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15)
 - RC receiver input capture (UART1 RX=PB7 with TIM4_CH2)
 - Battery voltage ADC (PC1)
+
+### Embedded Firmware (RP2350)
+```sh
+cargo build-rp  # Alias for cargo build --target thumbv8m.main-none-eabihf --features rp2350
+                # Builds firmware for Raspberry Pi Pico 2 W (RP2350)
+```
+
+**Flashing via UF2 Bootloader**:
+1. Hold BOOTSEL button while plugging in the Pico 2 W (enters bootloader mode)
+2. Device will mount as a USB mass storage device
+3. Generate and copy UF2 file:
+```sh
+# Install latest elf2uf2-rs with RP2350 support
+cargo install --git https://github.com/JoNil/elf2uf2-rs --force
+
+# Convert ELF to UF2 with correct family ID
+elf2uf2-rs convert --family rp2350-arm-s \
+  target/thumbv8m.main-none-eabihf/debug/kasarisw-rp2350 \
+  target/thumbv8m.main-none-eabihf/debug/kasarisw-rp2350.uf2
+
+# Copy to mounted Pico (path may vary)
+cp target/thumbv8m.main-none-eabihf/debug/kasarisw-rp2350.uf2 /run/media/$USER/RP2350/
+sync
+```
+4. Pico will automatically reboot and run the firmware
+
+**Alternative: Direct deployment** (requires udev rules):
+```sh
+elf2uf2-rs deploy --family rp2350-arm-s \
+  target/thumbv8m.main-none-eabihf/debug/kasarisw-rp2350
+```
+
+**Hardware**: Raspberry Pi Pico 2 W
+- **MCU**: RP2350 (dual Cortex-M33 @ 150MHz, 520KB SRAM, 4MB flash)
+- **WiFi**: Integrated CYW43439 (2.4GHz 802.11n)
+- **LIDAR**: TFA300 on UART1 (GP5 RX @ 921600 baud)
+- **Accelerometer**: ADXL373 on SPI0 (GP16-19)
+- **Motors**: 2x PWM @ 400Hz (GP0-1)
+- **RC Receiver**: PWM input capture on GP10
+- **Battery Monitor**: ADC on GP26 (10kΩ/1kΩ divider)
+- **Test LED**: GP21 (for firmware verification)
+
+**Current Status**: Phase 3 complete - minimal firmware boots successfully and blinks LED on GP21. Ready to implement peripheral tasks (Phase 5):
+- LIDAR UART reading at 10kHz
+- Motor PWM control (400Hz, bidirectional ESC)
+- Accelerometer SPI reading at 100Hz
+- RC receiver PWM input capture
+- Battery voltage ADC monitoring
+- WiFi integration (Phase 6) with CYW43439 for event streaming
 
 ## Monitoring/Control
 - **Note**: Monitoring tools are outdated and from the ESP32 version. Need updating for STM32F722.
@@ -219,7 +274,9 @@ probe-rs attach --chip STM32F722RETx
 
 ## Dependencies (Cargo.toml)
 - **Shared** (platform-independent): embassy-sync, ringbuffer, static_cell, arrayvec, num-traits, libm, critical-section.
-- **Embedded** (STM32): embassy-stm32, embassy-executor, embassy-time, cortex-m, cortex-m-rt, alloc-cortex-m, defmt, defmt-rtt, panic-probe, embedded-hal.
+- **Embedded** (ARM Cortex-M): embassy-executor, embassy-time, cortex-m, cortex-m-rt, defmt, defmt-rtt, panic-probe, embedded-hal, portable-atomic.
+- **STM32F722**: embassy-stm32, embassy-net, alloc-cortex-m.
+- **RP2350**: embassy-rp, cyw43, cyw43-pio, embedded-alloc.
 - **Simulator** (PC): clap, eframe, egui_plot, serde_json, rand, ctrlc, crossbeam-channel.
 
 ## Event Format
