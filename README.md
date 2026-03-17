@@ -224,6 +224,11 @@ probe-rs attach --chip STM32F722RETx
 
 ## Event Format
 - Lidar: [ts, d1..d4] (mm).
+  - TODO: Let's modify the Lidar event (all platforms + shared logic +
+    simulator) to hold only a single measurement to match the TFA300. No
+    backwards compatibility with the old event format. Or is a single sample
+    per event too little to support 10kHz sampling? Should we make it a
+    10-sample event to reduce event rate?
 - Accel: [ts, ay, az] (G).
 - Receiver: [ts, ch, pulse|null] (us).
 - Vbat: [ts, voltage] (V).
