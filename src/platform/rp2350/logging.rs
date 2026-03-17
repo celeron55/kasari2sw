@@ -32,7 +32,14 @@ impl log::Log for Logger {
                 cortex_m::interrupt::free(|cs| {
                     if let Ok(mut uart_ref) = LOG_UART.borrow(cs).try_borrow_mut() {
                         if let Some(ref mut u) = *uart_ref {
-                            u.blocking_write(buf.as_bytes()).ok();
+                            let data = buf.as_bytes();
+                            let mut written = 0;
+                            while written < data.len() {
+                                match u.blocking_write(&data[written..]) {
+                                    Ok(n) => written += n,
+                                    Err(_) => break,
+                                }
+                            }
                         }
                     }
                 });
