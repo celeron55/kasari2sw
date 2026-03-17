@@ -28,7 +28,7 @@ impl log::Log for Logger {
             };
 
             let mut buf: String<256> = String::new();
-            if writeln!(buf, "[{}] {}", level_str, record.args()).is_ok() {
+            if writeln!(buf, "[{}] {}\r", level_str, record.args()).is_ok() {
                 cortex_m::interrupt::free(|cs| {
                     if let Ok(mut uart_ref) = LOG_UART.borrow(cs).try_borrow_mut() {
                         if let Some(ref mut u) = *uart_ref {
