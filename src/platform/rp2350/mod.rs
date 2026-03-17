@@ -5,6 +5,7 @@ mod pins;
 mod sensors;
 mod logging;
 mod log_server;
+mod panic_uart;
 
 use log::info;
 use cyw43_pio::PioSpi;
@@ -29,7 +30,20 @@ const AP_CHANNEL: u8 = 1;
 const IP_ADDR: u8 = 1;
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    panic_uart::init();
+    panic_uart::write("\r\n\r\n=== PANIC ===\r\n");
+    
+    if let Some(location) = info.location() {
+        panic_uart::write("Location: ");
+        panic_uart::write(location.file());
+        panic_uart::write(":");
+        panic_uart::write_decimal(location.line() as u32);
+        panic_uart::write("\r\n");
+    }
+    
+    panic_uart::write("\r\nHalting...\r\n");
+    
     loop {
         cortex_m::asm::wfi();
     }
