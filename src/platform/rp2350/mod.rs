@@ -91,8 +91,8 @@ async fn main(spawner: Spawner) {
     uart0_config.baudrate = 115200;
     let uart0 = BufferedUart::new(
         p.UART0,
-        p.PIN_16,  // TX
-        p.PIN_17,  // RX
+        p.PIN_0,   // TX (GP0)
+        p.PIN_1,   // RX (GP1)
         Irqs,
         UART0_TX_BUFFER.init([0; 256]),
         UART0_RX_BUFFER.init([0; 256]),
@@ -102,7 +102,7 @@ async fn main(spawner: Spawner) {
     
     // Initialize logger - logs go to UART0 via BufferedUartTx
     logging::init_logger(uart0_tx);
-    info!("Logger initialized - logs streaming to UART0 (GP16 TX, 115200 baud, buffered)");
+    info!("Logger initialized - logs streaming to UART0 (GP0 TX, GP1 RX, 115200 baud, buffered)");
     info!("TCP log server not yet implemented - requires embassy-net WiFi integration");
 
     // Initialize buffered UART1 for LIDAR (921600 baud)
