@@ -15,6 +15,7 @@ pub async fn log_server_task(stack: Stack<'static>) -> ! {
 
     let mut rx_buffer = [0; RX_BUFFER_SIZE];
     let mut tx_buffer = [0; TX_BUFFER_SIZE];
+    let mut pending_data: heapless::Vec<u8, 4096> = heapless::Vec::new();
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
@@ -33,24 +34,34 @@ pub async fn log_server_task(stack: Stack<'static>) -> ! {
 
         // Stream logs to client
         loop {
-            // Read from ring buffer
-            let ring_ref = get_ring_buffer();
-            let data = cortex_m::interrupt::free(|cs| {
-                let mut rb = ring_ref.borrow(cs);
-                let ring = rb.borrow_mut();
-                let len = ring.len();
-                let mut vec = heapless::Vec::<u8, 4096>::new();
-                for b in ring.iter().take(len) {
-                    let _ = vec.push(*b);
-                }
-                vec
-            });
+            // Pull data from ring buffer if we don't have any pending
+            if pending_data.is_empty() {
+                cortex_m::interrupt::free(|cs| {
+                    let rb = get_ring_buffer().borrow(cs);
+                    let mut ring = rb.borrow_mut();
+                    while pending_data.capacity() > pending_data.len() {
+                        if let Some(byte) = ring.dequeue() {
+                            let _ = pending_data.push(byte);
+                        } else {
+                            break;
+                        }
+                    }
+                });
+            }
 
-            if !data.is_empty() {
-                match socket.write(&data).await {
-                    Ok(_) => {}
+            // Try to send pending data
+            if !pending_data.is_empty() {
+                match socket.write(&pending_data).await {
+                    Ok(n) => {
+                        // Remove sent bytes from the front
+                        for i in n..pending_data.len() {
+                            pending_data[i - n] = pending_data[i];
+                        }
+                        unsafe { pending_data.set_len(pending_data.len() - n); }
+                    }
                     Err(e) => {
                         info!("Write error: {:?}", e);
+                        pending_data.clear();
                         break;
                     }
                 }
@@ -60,6 +71,7 @@ pub async fn log_server_task(stack: Stack<'static>) -> ! {
         }
 
         info!("TCP client disconnected");
+        pending_data.clear();
     }
 }
 
