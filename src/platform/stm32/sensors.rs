@@ -1,21 +1,19 @@
 // TFA300 LIDAR Protocol Constants
-pub const PACKET_SIZE: usize = 9;         // 9 bytes for TFA300 (was 22 for LDS02RR)
-pub const HEAD_BYTE_1: u8 = 0x59;         // First header byte
-pub const HEAD_BYTE_2: u8 = 0x59;         // Second header byte
+pub const PACKET_SIZE: usize = 9; // 9 bytes for TFA300 (was 22 for LDS02RR)
+pub const HEAD_BYTE_1: u8 = 0x59; // First header byte
+pub const HEAD_BYTE_2: u8 = 0x59; // Second header byte
 pub const LIDAR_DISTANCE_OFFSET: f32 = 36.0; // Distance offset based on mounting position (may need retuning)
 
 // Note: No LIDAR_ENCODER_HZ needed! TFA300 doesn't require encoder signal (major simplification)
 
 pub struct ParsedPacket {
-    pub distances: [u16; 4], // mm (TFA300 gives 1 value, replicated 4x for compatibility)
+    pub distance: u16, // mm (TFA300 gives 1 value per packet)
 }
 
 /// Parse TFA300 9-byte UART packet
 /// Format: [0x59, 0x59, DIST_L, DIST_H, STRENGTH_L, STRENGTH_H, 0x00, 0x00, CHECKSUM]
 pub fn parse_packet(packet: &[u8]) -> Option<ParsedPacket> {
-    if packet.len() != PACKET_SIZE
-        || packet[0] != HEAD_BYTE_1
-        || packet[1] != HEAD_BYTE_2 {
+    if packet.len() != PACKET_SIZE || packet[0] != HEAD_BYTE_1 || packet[1] != HEAD_BYTE_2 {
         return None;
     }
 
@@ -31,11 +29,7 @@ pub fn parse_packet(packet: &[u8]) -> Option<ParsedPacket> {
         return None;
     }
 
-    // TFA300 gives single distance per packet (unlike LDS02RR's 4)
-    // Replicate it 4 times to maintain compatibility with existing algorithm
-    Some(ParsedPacket {
-        distances: [distance, distance, distance, distance],
-    })
+    Some(ParsedPacket { distance })
 }
 
 /// Compute TFA300 checksum (simple sum of bytes, lower 8 bits)
@@ -60,6 +54,8 @@ pub fn compute_checksum(data: &[u8]) -> u8 {
 //     let publisher = event_channel.publisher().unwrap();
 //     let mut buffer = [0u8; PACKET_SIZE * 8];  // Buffer for multiple packets
 //     let mut pos = 0;
+//     let mut samples = [0.0f32; 10];
+//     let mut sample_idx = 0;
 //
 //     loop {
 //         // Read data asynchronously with DMA
@@ -72,22 +68,17 @@ pub fn compute_checksum(data: &[u8]) -> u8 {
 //                     // Look for header bytes
 //                     if buffer[0] == HEAD_BYTE_1 && buffer[1] == HEAD_BYTE_2 {
 //                         if let Some(parsed) = parse_packet(&buffer[0..PACKET_SIZE]) {
-//                             // Get timestamp (microseconds)
-//                             let ts = embassy_time::Instant::now().as_micros() as u64;
-//
 //                             // Process distance with offset
-//                             let d = parsed.distances[0];
-//                             let d_processed = process_raw_lidar_distance(d);
+//                             let d = parsed.distance as f32 + LIDAR_DISTANCE_OFFSET;
+//                             samples[sample_idx] = d.max(0.0);
+//                             sample_idx += 1;
 //
-//                             // Publish event (TFA300 gives 1 distance, replicate 4x)
-//                             let event = InputEvent::Lidar(
-//                                 ts,
-//                                 d_processed,
-//                                 d_processed,
-//                                 d_processed,
-//                                 d_processed,
-//                             );
-//                             publisher.publish_immediate(event);
+//                             if sample_idx >= 10 {
+//                                 let ts = embassy_time::Instant::now().as_micros() as u64;
+//                                 let event = InputEvent::Lidar(ts, samples);
+//                                 publisher.publish_immediate(event);
+//                                 sample_idx = 0;
+//                             }
 //                         }
 //                         // Shift buffer
 //                         buffer.copy_within(PACKET_SIZE.., 0);
@@ -105,16 +96,6 @@ pub fn compute_checksum(data: &[u8]) -> u8 {
 //             }
 //         }
 //     }
-// }
-
-// TODO: Distance processing function (apply offset)
-// fn process_raw_lidar_distance(raw_mm: u16) -> u16 {
-//     if raw_mm == 0 {
-//         return 0;
-//     }
-//     let offset_mm = LIDAR_DISTANCE_OFFSET;
-//     let adjusted = raw_mm as f32 + offset_mm;
-//     adjusted.max(0.0) as u16
 // }
 
 // TODO: Accelerometer Task

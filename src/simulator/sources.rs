@@ -121,15 +121,12 @@ impl FileEventSource {
                                 }
                                 // Update event ts or other parameters
                                 event = match event {
-                                    InputEvent::Lidar(_, d1, d2, d3, d4) => {
+                                    InputEvent::Lidar(_, mut samples) => {
                                         let o = self.lidar_distance_offset;
-                                        InputEvent::Lidar(
-                                            adjusted_ts,
-                                            d1 + o,
-                                            d2 + o,
-                                            d3 + o,
-                                            d4 + o,
-                                        )
+                                        for s in &mut samples {
+                                            *s += o;
+                                        }
+                                        InputEvent::Lidar(adjusted_ts, samples)
                                     }
                                     InputEvent::Accelerometer(_, ay, az) => {
                                         InputEvent::Accelerometer(adjusted_ts, ay, az)
@@ -234,13 +231,11 @@ impl EventSource for FileEventSource {
 
             if self.debug {
                 match event {
-                    InputEvent::Lidar(ts, d1, d2, d3, d4) => println!(
-                        "Mirrored Lidar ts={} d=({:.0},{:.0},{:.0},{:.0}) theta={:.4} rpm={:.2}",
+                    InputEvent::Lidar(ts, samples) => println!(
+                        "Mirrored Lidar ts={} d=({:.0},{:.0},{:.0},{:.0},{:.0},{:.0},{:.0},{:.0},{:.0},{:.0}) theta={:.4} rpm={:.2}",
                         ts,
-                        d1,
-                        d2,
-                        d3,
-                        d4,
+                        samples[0], samples[1], samples[2], samples[3], samples[4],
+                        samples[5], samples[6], samples[7], samples[8], samples[9],
                         self.mirror.logic.detector.theta,
                         self.mirror.logic.detector.rpm
                     ),
@@ -486,27 +481,21 @@ impl SimEventSource {
                 };
                 let delta_t_sec = (next_lidar - self.last_lidar_ts) as f32 / 1_000_000.0;
                 let delta_theta = self.robot.rpm / 60.0 * 2.0 * PI * delta_t_sec;
-                let step_theta = delta_theta / 4.0;
-                let mut distances = [0.0; 4];
-                for i in 0..4 {
+                let step_theta = delta_theta / 10.0;
+                let mut samples = [0.0f32; 10];
+                for i in 0..10 {
                     let angle =
-                        rem_euclid_f32(self.robot.theta - ((3 - i) as f32 * step_theta), 2.0 * PI)
+                        rem_euclid_f32(self.robot.theta - ((9 - i) as f32 * step_theta), 2.0 * PI)
                             + angle_noise;
                     let dir_x = angle.cos();
                     let dir_y = angle.sin();
                     let true_dist =
                         self.world
                             .raycast(self.robot.pos_x, self.robot.pos_y, dir_x, dir_y);
-                    distances[i] = (true_dist - self.lidar_distance_offset).max(0.0);
-                    distances[i] += distance_noise;
+                    samples[i] = (true_dist - self.lidar_distance_offset).max(0.0);
+                    samples[i] += distance_noise;
                 }
-                let event = InputEvent::Lidar(
-                    next_lidar,
-                    distances[0],
-                    distances[1],
-                    distances[2],
-                    distances[3],
-                );
+                let event = InputEvent::Lidar(next_lidar, samples);
                 self.event_buffer.push_back(event.clone());
                 self.control_logic.feed_event(event);
                 self.last_lidar_ts = next_lidar;

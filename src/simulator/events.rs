@@ -16,14 +16,14 @@ pub fn parse_event(line: &str) -> Result<InputEvent, Box<dyn Error>> {
 
     match typ {
         "Lidar" => {
-            if v.len() != 6 {
+            if v.len() != 12 {
                 return Err("Invalid Lidar event length".into());
             }
-            let d1 = v[2].as_f64().ok_or("Invalid d1")? as f32;
-            let d2 = v[3].as_f64().ok_or("Invalid d2")? as f32;
-            let d3 = v[4].as_f64().ok_or("Invalid d3")? as f32;
-            let d4 = v[5].as_f64().ok_or("Invalid d4")? as f32;
-            Ok(InputEvent::Lidar(ts, d1, d2, d3, d4))
+            let mut samples = [0.0f32; 10];
+            for i in 0..10 {
+                samples[i] = v[2 + i].as_f64().ok_or(format!("Invalid d{}", i))? as f32;
+            }
+            Ok(InputEvent::Lidar(ts, samples))
         }
         "Accelerometer" => {
             if v.len() != 4 {

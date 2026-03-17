@@ -88,19 +88,19 @@ pub mod kasari {
             // Debug prints disabled for STM32 (use defmt logging in embedded.rs instead)
         };
     }
-    #[cfg(all(target_os = "none", target_arch = "arm"))]
-    use println;
     use libm::{atan2f, cosf, fabsf, sqrtf};
     use num_traits::float::FloatCore;
+    #[cfg(all(target_os = "none", target_arch = "arm"))]
+    use println;
     #[cfg(not(target_os = "none"))]
     use std::vec::Vec; // powi on esp32
 
     #[derive(Clone, Debug)]
     pub enum InputEvent {
-        Lidar(u64, f32, f32, f32, f32), // timestamp, distance samples (mm)
-        Accelerometer(u64, f32, f32),   // timestamp, acceleration Y (G), acceleration Z (G)
-        Receiver(u64, u8, Option<f32>), // timestamp, channel (0=throttle), pulse length (us)
-        Vbat(u64, f32),                 // timestamp, battery voltage (V)
+        Lidar(u64, [f32; 10]),               // timestamp, distance samples (mm)
+        Accelerometer(u64, f32, f32),        // timestamp, acceleration Y (G), acceleration Z (G)
+        Receiver(u64, u8, Option<f32>),      // timestamp, channel (0=throttle), pulse length (us)
+        Vbat(u64, f32),                      // timestamp, battery voltage (V)
         WifiControl(u64, u8, f32, f32, f32), // timestamp, mode, rotation speed, movement speed, turning speed
         Planner(
             u64,
@@ -853,14 +853,13 @@ pub mod kasari {
     pub fn serialize_event(event: &InputEvent) -> Vec<u8> {
         let mut buf = Vec::with_capacity(32);
         match event {
-            InputEvent::Lidar(ts, d1, d2, d3, d4) => {
+            InputEvent::Lidar(ts, samples) => {
                 let tag = (0u16 ^ TAG_XOR).to_le_bytes();
                 buf.extend_from_slice(&tag);
                 buf.extend_from_slice(&ts.to_le_bytes());
-                buf.extend_from_slice(&d1.to_le_bytes());
-                buf.extend_from_slice(&d2.to_le_bytes());
-                buf.extend_from_slice(&d3.to_le_bytes());
-                buf.extend_from_slice(&d4.to_le_bytes());
+                for &s in samples {
+                    buf.extend_from_slice(&s.to_le_bytes());
+                }
             }
             InputEvent::Accelerometer(ts, accel_y, accel_z) => {
                 let tag = (1u16 ^ TAG_XOR).to_le_bytes();

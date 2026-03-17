@@ -137,7 +137,7 @@ impl ObjectDetector {
         // Ignore everything other than Lidar events. We want to synchronize to
         // those only, and other events can arrive slightly out of order.
         let ts = match event {
-            Lidar(ts, _, _, _, _) => *ts,
+            Lidar(ts, _) => *ts,
             _ => return,
         };
 
@@ -158,8 +158,7 @@ impl ObjectDetector {
         self.last_ts = Some(ts);
 
         match event {
-            Lidar(_, d1, d2, d3, d4) => {
-                let distances = [*d1, *d2, *d3, *d4];
+            Lidar(_, distances) => {
                 let delta_theta = if self.rpm != 0.0 {
                     0.002083 * ((self.rpm.abs() / 60.0) * 2.0 * PI)
                 } else {
