@@ -18,6 +18,7 @@ mod sensors;
 mod logging;
 mod panic_uart;
 mod usb_cdc;
+pub mod dshot;
 
 bind_interrupts!(struct Irqs {
     UART4 => UsartInterruptHandler<peripherals::UART4>;
@@ -291,28 +292,57 @@ async fn main(spawner: Spawner) {
     // let main_logic = mk_static!(MainLogic, MainLogic::new(...));
     // spawner.spawn(main_logic_task(main_logic, event_channel, motor_pwm)).unwrap();
 
-    // TODO: Spawn motor update task (200 Hz, reads MotorModulator and updates PWM)
-    // spawner.spawn(motor_update_task(motor_pwm, main_logic)).unwrap();
-
-    // TODO: Spawn flash logger task
-    // spawner.spawn(flash_logger_task(flash, event_channel)).unwrap();
-
     // ============================================================================
-    // CURRENT STATUS: LED blink test
+    // DSHOT MOTOR CONTROL TEST
     // ============================================================================
 
-    info!("LED test: GYRO (blue) off, MCU (orange) blinking");
+    let mut dshot = dshot::DShot::new();
+    dshot.init(dshot::DSHOT300_HZ);
+    info!("DShot initialized on TIM3 (PC8, PC9), 300 kbit/s");
 
-    // GYRO (blue) off, MCU (orange) toggling at 1 Hz
-    // Active-low: HIGH = OFF, LOW = ON
-    led_gyro.set_high();  // OFF
+    // Send arming sequence: 0 throttle for 300ms
+    info!("Sending arming sequence (0 throttle for 300ms)...");
+    let arm_start = embassy_time::Instant::now();
+    while arm_start.elapsed().as_millis() < 300 {
+        dshot.send_frame(0, 0);
+    }
+    info!("Arming sequence complete");
+
+    // Test with increasing throttle
+    info!("Testing motor output with throttle sweep...");
 
     let mut counter = 0u32;
+    let mut throttle: u16 = 0;
+    let mut increasing = true;
+
     loop {
-        led_mcu.toggle();
-        info!("Heartbeat {} - LED toggled", counter);
-        counter = counter.wrapping_add(1);
-        Timer::after_millis(500).await;
+        // Send DShot frame at high rate
+        dshot.send_frame(throttle, throttle);
+
+        // Update throttle every ~50 frames
+        counter += 1;
+        if counter % 50 == 0 {
+            if increasing {
+                throttle += 48;
+                if throttle >= 1048 {
+                    increasing = false;
+                }
+            } else {
+                throttle = throttle.saturating_sub(48);
+                if throttle == 0 {
+                    increasing = true;
+                }
+            }
+            info!("Throttle: {} (frame {})", throttle, counter);
+        }
+
+        // Small delay between DShot frames
+        Timer::after_micros(200).await;
+
+        // Toggle LED every 1 second (500ms on/off)
+        if counter % 5000 == 0 {
+            led_mcu.toggle();
+        }
     }
 }
 
