@@ -222,6 +222,13 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 - UART5: TX=PC12, RX=PD2 (F.Port - **available** unless using F.Port)
 - UART6: TX=PC6, RX=PC7 (RX connected to ESC for telemetry, TX destination unknown)
 
+**WiFi Module (W600)**:
+- Chip: WinnerMicro W600-BA00 on UART4 (115200 baud, transparent bridge mode)
+- AP Name: "Mamba Stack [MAC]", IP: 192.168.1.1 (client: 192.168.1.2)
+- TCP Port: 4278 (MSP/data bridge - UART4 data appears here)
+- WiFi active ~60s after power-on if no client connects
+- No initialization needed from STM32 - just send data on UART4
+
 **SPI**:
 - SPI1 (Onboard MPU6000 gyro): CS=PA4, SCK=PA5, MISO=PA6, MOSI=PA7, EXTI=PC4
 - SPI2 (External ADXL373 accelerometer): CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15
