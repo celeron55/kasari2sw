@@ -208,10 +208,10 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 ### Peripherals
 
 **Motors (4x PWM outputs - using 2 for differential drive)**:
-- MOTOR1: PC8 (TIM3_CH3)
-- MOTOR2: PC9 (TIM3_CH4)
-- MOTOR3: PA8 (TIM1_CH1)
-- MOTOR4: PA9 (TIM1_CH2)
+- MOTOR1: PC8 (TIM3_CH3) - Left motor
+- MOTOR2: PC9 (TIM3_CH4) - Right motor
+- MOTOR3: PA8 (TIM1_CH1) - unused
+- MOTOR4: PA9 (TIM1_CH2) - unused
 
 **UARTs** (board default connections):
 - UART1: TX=PB6, RX=PB7 (Receiver port - **RC receiver input**, PB7 also has TIM4_CH2)
