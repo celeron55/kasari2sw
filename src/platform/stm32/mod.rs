@@ -6,9 +6,10 @@ use embassy_stm32::{
     bind_interrupts,
     gpio::{Level, Output, Speed},
     peripherals,
-    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, Uart},
+    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, Uart, RingBufferedUartRx},
     Config,
 };
+use static_cell::StaticCell;
 use embassy_time::Timer;
 use log::info;
 
@@ -22,8 +23,11 @@ pub mod dshot;
 pub mod dshot_dma;
 // mod debug_uart;  // Commented out - not used
 
+use kasarisw::shared::kasari::{InputEvent, MainLogic, MotorModulator};
+
 bind_interrupts!(struct Irqs {
     UART4 => UsartInterruptHandler<peripherals::UART4>;
+    USART2 => UsartInterruptHandler<peripherals::USART2>;
     OTG_FS => embassy_stm32::usb::InterruptHandler<peripherals::USB_OTG_FS>;
 });
 
@@ -165,11 +169,70 @@ async fn main(spawner: Spawner) {
     info!("USB CDC initialized - logs also streaming to USB (PA12 D+, PA11 D-)");
 
     // ============================================================================
+    // EVENT CHANNEL - Pub/Sub for sensor events
+    // ============================================================================
+
+    use kasarisw::shared::{EventChannel, EVENT_CHANNEL};
+    let event_channel = EVENT_CHANNEL.init(EventChannel::new());
+    info!("Event channel initialized");
+
+    // ============================================================================
+    // LIDAR UART2 - TFA300 at 921600 baud (PA3 RX only)
+    // ============================================================================
+
+    // DMA ring buffer for high-speed UART2 reception
+    static LIDAR_DMA_BUF: StaticCell<[u8; 256]> = StaticCell::new();
+
+    let mut uart2_config = UartConfig::default();
+    uart2_config.baudrate = 921600;
+
+    // Create UART2 with DMA for efficient high-speed reception
+    // USART2_RX uses DMA1_Stream5 (no conflict with DShot on Stream2/7)
+    let uart2 = Uart::new(
+        p.USART2,
+        p.PA3,  // RX (LIDAR data in)
+        p.PA2,  // TX (unused but required by HAL)
+        Irqs,
+        p.DMA1_CH6,  // TX DMA (unused)
+        p.DMA1_CH5,  // RX DMA
+        uart2_config,
+    ).unwrap();
+
+    // Split and use only RX with ring buffer
+    let (_uart2_tx, uart2_rx) = uart2.split();
+    let lidar_rx = uart2_rx.into_ring_buffered(LIDAR_DMA_BUF.init([0u8; 256]));
+
+    // Get publisher for LIDAR task
+    let lidar_publisher = event_channel.publisher().unwrap();
+    spawner.spawn(sensors::lidar_publisher(lidar_rx, lidar_publisher)).unwrap();
+    info!("LIDAR initialized - UART2 at 921600 baud (PA3 RX, DMA1_CH5)");
+
+    // ============================================================================
+    // MAIN LOGIC TASK - Event processing and motor control planning
+    // ============================================================================
+
+    // Create shared state for MainLogic and MotorModulator
+    use core::cell::RefCell;
+    use critical_section::Mutex;
+
+    static MAIN_LOGIC: StaticCell<Mutex<RefCell<MainLogic>>> = StaticCell::new();
+    let main_logic = MAIN_LOGIC.init(Mutex::new(RefCell::new(MainLogic::new(false))));
+
+    static MOTOR_MODULATOR: StaticCell<Mutex<RefCell<MotorModulator>>> = StaticCell::new();
+    let motor_modulator = MOTOR_MODULATOR.init(Mutex::new(RefCell::new(MotorModulator::new())));
+
+    // Get subscriber and publisher for main logic task
+    let main_logic_subscriber = event_channel.subscriber().unwrap();
+    let main_logic_publisher = event_channel.publisher().unwrap();
+    spawner.spawn(main_logic_task(main_logic, motor_modulator, main_logic_subscriber, main_logic_publisher)).unwrap();
+    info!("MainLogic task started");
+
+    // ============================================================================
     // LED TEST - Mamba F722APP Status LEDs
     // ============================================================================
 
     // PC15 = GYRO (blue), PC14 = MCU (orange) - ACTIVE LOW!
-    let mut led_gyro = Output::new(p.PC15, Level::High, Speed::Low);  // Start OFF (HIGH = OFF)
+    let _led_gyro = Output::new(p.PC15, Level::High, Speed::Low);  // Start OFF (HIGH = OFF)
     let mut led_mcu = Output::new(p.PC14, Level::High, Speed::Low);   // Start OFF
 
     info!("LED test: GYRO (blue/PC15), MCU (orange/PC14) - active LOW");
@@ -297,114 +360,155 @@ async fn main(spawner: Spawner) {
     // spawner.spawn(main_logic_task(main_logic, event_channel, motor_pwm)).unwrap();
 
     // ============================================================================
-    // DSHOT MOTOR CONTROL TEST (DMA version)
+    // MOTOR UPDATE TASK - DShot output with MotorModulator at 500 Hz
     // ============================================================================
 
+    spawner.spawn(motor_update_task(motor_modulator)).unwrap();
+    info!("Motor update task started");
+
+    // ============================================================================
+    // MAIN LOOP - Heartbeat and status monitoring
+    // ============================================================================
+
+    loop {
+        // Toggle MCU LED as heartbeat
+        led_mcu.toggle();
+        Timer::after_millis(500).await;
+    }
+}
+
+/// Convert RPM to bidirectional DShot throttle value
+/// Input: RPM (-2000 to +2000 typical range)
+/// Output: DShot throttle (0=off, 48-1047=reverse, 1048=center, 1049-2047=forward)
+fn rpm_to_dshot_throttle(rpm: f32) -> u16 {
+    const MAX_RPM: f32 = 2000.0;
+    const DSHOT_CENTER: u16 = 1048;
+    const DSHOT_RANGE: u16 = 999; // 1047 - 48 or 2047 - 1049
+
+    if rpm.abs() < 10.0 {
+        // Below threshold, send zero (motors off)
+        return 0;
+    }
+
+    let normalized = (rpm / MAX_RPM).clamp(-1.0, 1.0);
+    let offset = (normalized * DSHOT_RANGE as f32) as i16;
+
+    // Bidirectional DShot: 1048 is center (stopped)
+    // > 1048 = forward, < 1048 = reverse
+    let throttle = (DSHOT_CENTER as i16 + offset) as u16;
+    throttle.clamp(48, 2047)
+}
+
+// ============================================================================
+// MOTOR UPDATE TASK - Runs at 500 Hz, reads MotorModulator and sends DShot
+// ============================================================================
+
+#[embassy_executor::task]
+async fn motor_update_task(
+    motor_modulator: &'static critical_section::Mutex<core::cell::RefCell<MotorModulator>>,
+) {
+    info!("Motor update task running");
+
+    // Initialize DShot DMA driver
     let mut dshot_dma = dshot_dma::DShotDma::new();
     dshot_dma.init();
 
+    // ESC arming sequence (throttle=0 for 300ms)
     info!("Sending ESC arming sequence (throttle=0 for 300ms)...");
-    led_mcu.toggle();
     let arm_start = embassy_time::Instant::now();
     while arm_start.elapsed().as_millis() < 300 {
         let frame = dshot::throttle_to_dshot_frame(0, false);
         dshot_dma.send_frame(frame, frame);
     }
-    led_mcu.toggle();
     info!("ESC armed");
 
+    // Motor update loop at 500 Hz (2ms interval)
+    let mut heartbeat_counter = 0u32;
+
     loop {
-        let frame = dshot::throttle_to_dshot_frame(500, false);
-        dshot_dma.send_frame(frame, frame);
-        Timer::after_millis(50).await;
+        let ts = embassy_time::Instant::now().as_micros() as u64;
+
+        // Get motor speeds from MotorModulator
+        let (left_rpm, right_rpm) = critical_section::with(|cs| {
+            let mut modulator = motor_modulator.borrow(cs).borrow_mut();
+            modulator.step(ts)
+        });
+
+        // Convert RPM to DShot throttle values
+        let left_throttle = rpm_to_dshot_throttle(left_rpm);
+        let right_throttle = rpm_to_dshot_throttle(right_rpm);
+
+        let left_frame = dshot::throttle_to_dshot_frame(left_throttle, false);
+        let right_frame = dshot::throttle_to_dshot_frame(right_throttle, false);
+        dshot_dma.send_frame(left_frame, right_frame);
+
+        // Heartbeat log every ~2 seconds (1000 iterations at 500Hz)
+        heartbeat_counter += 1;
+        if heartbeat_counter >= 1000 {
+            heartbeat_counter = 0;
+            info!("Motor: L={:.0} R={:.0} RPM, thr={}/{}", left_rpm, right_rpm, left_throttle, right_throttle);
+        }
+
+        Timer::after_micros(2000).await;
+    }
+}
+
+// ============================================================================
+// MAIN LOGIC TASK - Processes sensor events and updates motor control plan
+// ============================================================================
+
+#[embassy_executor::task]
+async fn main_logic_task(
+    main_logic: &'static critical_section::Mutex<core::cell::RefCell<MainLogic>>,
+    motor_modulator: &'static critical_section::Mutex<core::cell::RefCell<MotorModulator>>,
+    mut subscriber: embassy_sync::pubsub::Subscriber<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
+    mut publisher: embassy_sync::pubsub::Publisher<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
+) {
+    use embassy_time::{Duration, Instant};
+
+    info!("MainLogic task running at ~50 Hz");
+
+    const LOOP_INTERVAL_MS: u64 = 20; // Target 50 Hz
+    const MIN_SLEEP_MS: u64 = 5;      // Minimum yield time for other tasks
+
+    loop {
+        let loop_start = Instant::now();
+        let ts = loop_start.as_micros() as u64;
+
+        critical_section::with(|cs| {
+            let mut logic = main_logic.borrow(cs).borrow_mut();
+
+            // Drain all pending events (non-blocking)
+            while let Some(event) = subscriber.try_next_message_pure() {
+                logic.feed_event(event);
+            }
+
+            // Run planning step every iteration (~50 Hz)
+            logic.step(ts, Some(&mut publisher), false);
+
+            // Sync MotorModulator with latest plan
+            if let Some(plan) = logic.motor_control_plan.clone() {
+                let mut modulator = motor_modulator.borrow(cs).borrow_mut();
+                modulator.sync(ts, logic.detector.theta, plan, logic.angular_correction_total);
+            } else {
+                // No plan - clear modulator
+                let mut modulator = motor_modulator.borrow(cs).borrow_mut();
+                modulator.mcp = None;
+            }
+        });
+
+        // Always yield at least 5ms to other tasks
+        Timer::after_millis(MIN_SLEEP_MS).await;
+
+        // Sleep remaining time to hit target interval (no catch-up if behind)
+        let elapsed_ms = loop_start.elapsed().as_millis();
+        if elapsed_ms < LOOP_INTERVAL_MS {
+            Timer::after(Duration::from_millis(LOOP_INTERVAL_MS - elapsed_ms)).await;
+        }
     }
 }
 
 // Note: alloc_error_handler is unstable. panic-probe will catch allocation failures.
-
-// ============================================================================
-// TODO: MAIN LOGIC TASK
-// ============================================================================
-// Processes events from sensor tasks and updates robot state
-//
-// #[embassy_executor::task]
-// async fn main_logic_task(
-//     main_logic: &'static Mutex<RefCell<kasari::MainLogic>>,
-//     event_channel: &'static EventChannel,
-//     // motor_pwm: ...,  // Reference to motor PWM for direct updates
-// ) {
-//     let subscriber = event_channel.subscriber().unwrap();
-//
-//     loop {
-//         // Wait for next event
-//         let event = subscriber.next_message_pure().await;
-//
-//         // Process event through MainLogic
-//         critical_section::with(|cs| {
-//             let mut logic = main_logic.borrow(cs).borrow_mut();
-//             logic.handle_input_event(event);
-//
-//             // MainLogic updates internal state:
-//             // - ObjectDetector binning
-//             // - DetectionResult (walls, objects, open spaces)
-//             // - MotorModulator planning (rotation_speed, movement vector)
-//             // - Mode switching (manual/autonomous)
-//         });
-//     }
-// }
-
-// ============================================================================
-// TODO: MOTOR UPDATE TASK
-// ============================================================================
-// Runs at 200 Hz, reads MotorModulator state and updates PWM duty cycles
-//
-// #[embassy_executor::task]
-// async fn motor_update_task(
-//     mut motor_pwm: SimplePwm<'static>,
-//     main_logic: &'static Mutex<RefCell<kasari::MainLogic>>,
-// ) {
-//     use embassy_time::{Duration, Ticker};
-//     use embassy_stm32::timer::simple_pwm::Channel;
-//
-//     const MOTOR_UPDATE_HZ: u64 = 200;
-//     let mut ticker = Ticker::every(Duration::from_hz(MOTOR_UPDATE_HZ));
-//
-//     let max_duty = motor_pwm.get_max_duty();
-//
-//     loop {
-//         ticker.next().await;
-//
-//         // Read motor state from MainLogic
-//         let (right_speed, left_speed) = critical_section::with(|cs| {
-//             let logic = main_logic.borrow(cs).borrow();
-//
-//             // Get current theta and modulator state
-//             let theta = logic.current_theta();
-//             let modulator = logic.motor_modulator();
-//
-//             // Calculate differential motor speeds
-//             // modulator.calculate(theta) returns (rotation_speed, amplitude, phase)
-//             let (rotation_speed, amplitude, phase) = modulator.calculate(theta);
-//
-//             // Differential modulation formula:
-//             // right_motor = base_rpm + amplitude * cos(theta - phase)
-//             // left_motor = base_rpm - amplitude * cos(theta - phase)
-//             let cos_val = libm::cosf(theta - phase);
-//             let right_speed = rotation_speed + amplitude * cos_val;
-//             let left_speed = rotation_speed - amplitude * cos_val;
-//
-//             (right_speed, left_speed)
-//         });
-//
-//         // Convert speeds to PWM duty cycles
-//         let right_duty = target_speed_to_pwm_duty(right_speed, max_duty);
-//         let left_duty = target_speed_to_pwm_duty(left_speed, max_duty);
-//
-//         // Update PWM
-//         motor_pwm.set_duty(Channel::Ch1, right_duty);
-//         motor_pwm.set_duty(Channel::Ch2, left_duty);
-//     }
-// }
 
 // ============================================================================
 // TODO: WIFI INITIALIZATION & TCP LISTENER

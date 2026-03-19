@@ -38,7 +38,9 @@ pub const LOG_MOTOR_CONTROL: bool = false;
 pub const LOG_VBAT: bool = false;
 pub const LOG_DETECTION: bool = false;
 
-pub type EventChannel = PubSubChannel<CriticalSectionRawMutex, kasari::InputEvent, 32, 3, 6>;
+// Queue size 64: LIDAR produces 1000 events/sec, main loop runs at 50 Hz = 20 events/cycle
+// Extra headroom for timing jitter and other event sources
+pub type EventChannel = PubSubChannel<CriticalSectionRawMutex, kasari::InputEvent, 64, 3, 6>;
 pub static EVENT_CHANNEL: StaticCell<EventChannel> = StaticCell::new();
 
 pub fn get_current_timestamp() -> u64 {
@@ -590,7 +592,7 @@ pub mod kasari {
             &mut self,
             timestamp: u64,
             publisher: Option<
-                &mut embassy_sync::pubsub::Publisher<CriticalSectionRawMutex, InputEvent, 32, 3, 6>,
+                &mut embassy_sync::pubsub::Publisher<CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
             >,
             debug: bool,
         ) {

@@ -1,3 +1,11 @@
+use embassy_stm32::usart::RingBufferedUartRx;
+use embassy_sync::pubsub::Publisher;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embedded_io_async::Read;
+use log::info;
+
+use kasarisw::shared::kasari::InputEvent;
+
 // TFA300 LIDAR Protocol Constants
 pub const PACKET_SIZE: usize = 9; // 9 bytes for TFA300 (was 22 for LDS02RR)
 pub const HEAD_BYTE_1: u8 = 0x59; // First header byte
@@ -35,6 +43,76 @@ pub fn parse_packet(packet: &[u8]) -> Option<ParsedPacket> {
 /// Compute TFA300 checksum (simple sum of bytes, lower 8 bits)
 pub fn compute_checksum(data: &[u8]) -> u8 {
     (data.iter().map(|&b| b as u16).sum::<u16>() & 0xFF) as u8
+}
+
+/// LIDAR publisher task - reads TFA300 packets from UART2 and publishes Lidar events
+#[embassy_executor::task]
+pub async fn lidar_publisher(
+    mut uart_rx: RingBufferedUartRx<'static>,
+    publisher: Publisher<'static, CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
+) {
+    info!("LIDAR task started");
+
+    let mut buffer = [0u8; PACKET_SIZE * 16]; // Buffer for multiple packets
+    let mut pos = 0usize;
+    let mut samples = [0.0f32; 10];
+    let mut sample_idx = 0usize;
+    let mut packet_count = 0u32;
+    let mut error_count = 0u32;
+
+    loop {
+        // Read available data into buffer
+        match uart_rx.read(&mut buffer[pos..]).await {
+            Ok(n) if n > 0 => {
+                pos += n;
+
+                // Process complete packets
+                while pos >= PACKET_SIZE {
+                    // Look for header bytes
+                    if buffer[0] == HEAD_BYTE_1 && buffer[1] == HEAD_BYTE_2 {
+                        if let Some(parsed) = parse_packet(&buffer[0..PACKET_SIZE]) {
+                            // Apply distance offset
+                            let d = parsed.distance as f32 + LIDAR_DISTANCE_OFFSET;
+                            samples[sample_idx] = d.max(0.0);
+                            sample_idx += 1;
+                            packet_count += 1;
+
+                            // Publish batch of 10 samples
+                            if sample_idx >= 10 {
+                                let ts = embassy_time::Instant::now().as_micros() as u64;
+                                let event = InputEvent::Lidar(ts, samples);
+                                publisher.publish_immediate(event);
+                                sample_idx = 0;
+                            }
+                        } else {
+                            error_count += 1;
+                        }
+                        // Shift buffer past this packet
+                        buffer.copy_within(PACKET_SIZE..pos, 0);
+                        pos -= PACKET_SIZE;
+                    } else {
+                        // Bad header, skip one byte to resync
+                        buffer.copy_within(1..pos, 0);
+                        pos -= 1;
+                        error_count += 1;
+                    }
+                }
+
+                // Log stats periodically
+                if packet_count > 0 && packet_count % 10000 == 0 {
+                    info!("LIDAR: {} packets, {} errors", packet_count, error_count);
+                }
+            }
+            Ok(_) => {
+                // Zero bytes read, continue
+            }
+            Err(_e) => {
+                // UART error, reset buffer
+                pos = 0;
+                error_count += 1;
+            }
+        }
+    }
 }
 
 // ============================================================================
