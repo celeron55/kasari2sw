@@ -10,6 +10,7 @@ runner = "probe-rs run --chip RP235x"
 rustflags = [
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
+  "-C", "link-arg=-Tmemory-rp2350.x",
 ]
 
 [unstable]
@@ -17,7 +18,7 @@ build-std = ["core", "alloc"]
 
 [alias]
 build-pc = ["build", "--features", "pc"]
-build-stm = ["build", "--target", "thumbv7em-none-eabihf", "--features", "stm32"]
-run-stm = ["run", "--target", "thumbv7em-none-eabihf", "--features", "stm32", "--bin", "kasarisw"]
+build-stm = ["build", "--release", "--target", "thumbv7em-none-eabihf", "--features", "stm32"]
+run-stm = ["run", "--release", "--target", "thumbv7em-none-eabihf", "--features", "stm32", "--bin", "kasarisw"]
 build-rp = ["build", "--target", "thumbv8m.main-none-eabihf", "--features", "rp2350"]
 run-rp = ["run", "--target", "thumbv8m.main-none-eabihf", "--features", "rp2350", "--bin", "kasarisw-rp2350"]

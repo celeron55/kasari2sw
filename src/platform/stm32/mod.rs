@@ -51,13 +51,14 @@ async fn main(_spawner: Spawner) {
     let mut config = Config::default();
     {
         use embassy_stm32::rcc::*;
+        // Mamba F722APP has 8 MHz HSE crystal
         config.rcc.hse = Some(Hse {
-            freq: embassy_stm32::time::Hertz(25_000_000), // 25 MHz HSE on Mamba F722APP
+            freq: embassy_stm32::time::Hertz(8_000_000),
             mode: HseMode::Oscillator,
         });
         config.rcc.pll_src = PllSource::HSE;
         config.rcc.pll = Some(Pll {
-            prediv: PllPreDiv::DIV25,     // 25 MHz / 25 = 1 MHz
+            prediv: PllPreDiv::DIV8,      // 8 MHz / 8 = 1 MHz
             mul: PllMul::MUL432,           // 1 MHz * 432 = 432 MHz
             divp: Some(PllPDiv::DIV2),     // 432 MHz / 2 = 216 MHz (SYSCLK)
             divq: Some(PllQDiv::DIV9),     // 432 MHz / 9 = 48 MHz (USB, SDIO, RNG)
@@ -71,7 +72,31 @@ async fn main(_spawner: Spawner) {
 
     let p = embassy_stm32::init(config);
 
-    info!("STM32F722 initialized at 216 MHz");
+    // Enable overdrive mode AFTER init for 216 MHz (>180 MHz requires this)
+    // Embassy might have configured clocks but not enabled overdrive
+    unsafe {
+        use embassy_stm32::pac;
+        use embassy_stm32::pac::pwr::vals::Vos;
+        // Set voltage scale 1 for high performance (required for 216 MHz)
+        pac::PWR.cr1().modify(|w| w.set_vos(Vos::SCALE1));
+        // Enable overdrive mode (required for >180 MHz)
+        pac::PWR.cr1().modify(|w| w.set_oden(true));
+        while !pac::PWR.csr1().read().odrdy() {}
+        pac::PWR.cr1().modify(|w| w.set_odswen(true));
+        while !pac::PWR.csr1().read().odswrdy() {}
+    }
+
+    info!("STM32F722 initialized at 216 MHz (8 MHz HSE, overdrive enabled)");
+
+    // ============================================================================
+    // LED TEST - Mamba F722APP Status LEDs
+    // ============================================================================
+
+    // PC15 = GYRO (blue), PC14 = MCU (orange) - ACTIVE LOW!
+    let mut led_gyro = Output::new(p.PC15, Level::High, Speed::Low);  // Start OFF (HIGH = OFF)
+    let mut led_mcu = Output::new(p.PC14, Level::High, Speed::Low);   // Start OFF
+
+    info!("LED test: GYRO (blue/PC15), MCU (orange/PC14) - active LOW");
 
     // ============================================================================
     // TODO: PERIPHERAL INITIALIZATION (awaiting Mamba F722APP pinout)
@@ -202,21 +227,18 @@ async fn main(_spawner: Spawner) {
     // spawner.spawn(flash_logger_task(flash, event_channel)).unwrap();
 
     // ============================================================================
-    // CURRENT STATUS: Minimal firmware
+    // CURRENT STATUS: LED blink test
     // ============================================================================
 
-    info!("Minimal STM32 firmware running - waiting for pinout info");
-    info!("Next steps:");
-    info!("1. Get Mamba F722APP pinout/schematic");
-    info!("2. Identify: Motor PWM pins, LIDAR UART, WiFi UART, SPI, ADC, LED");
-    info!("3. Uncomment peripheral initialization above");
-    info!("4. Uncomment sensor task spawning above");
-    info!("5. Implement sensor tasks in src/sensors.rs (see TODOs there)");
+    info!("LED test: GYRO (blue) off, MCU (orange) blinking");
 
-    // Simple loop to keep the firmware alive
+    // GYRO (blue) off, MCU (orange) toggling at 1 Hz
+    // Active-low: HIGH = OFF, LOW = ON
+    led_gyro.set_high();  // OFF
+
     loop {
-        Timer::after_millis(1000).await;
-        info!("Heartbeat: {}", embassy_time::Instant::now().as_millis());
+        led_mcu.toggle();
+        Timer::after_millis(500).await;
     }
 }
 

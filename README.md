@@ -101,18 +101,17 @@ flamegraph --perfdata perf.data --image-width 4096
 ```
 
 ### Embedded Firmware (STM32F722)
+
+Builds are always release with debug symbols.
+
 ```sh
-cargo build-stm  # Alias for cargo build --target thumbv7em-none-eabihf --features stm32
-cargo run-stm    # Alias for cargo run --target thumbv7em-none-eabihf --features stm32 --bin kasarisw
-                 # Uses probe-rs to flash and run on STM32F722
+cargo build-stm      # Build firmware
+./flash-dfu.sh       # Flash via DFU (BOOT0 high)
+cargo run-stm        # Flash via probe-rs (SWD)
+probe-rs attach --chip STM32F722RETx  # View defmt logs over RTT
 ```
 
-**Note**: Logs are output via defmt over RTT (Real-Time Transfer). View with:
-```sh
-probe-rs attach --chip STM32F722RETx
-```
-
-**Current Status**: Minimal firmware boots and logs heartbeat. Pinout identified from Betaflight MAMBAF722_I2C target. Hardware modification planned (desolder OSD chip, rewire SPI2 to ADXL373). Ready to implement:
+**Current Status**: LED blink test working at 216 MHz (8 MHz HSE + overdrive mode). GYRO (blue) and MCU (orange) LEDs alternate at 1 Hz. Ready to implement:
 - Motor DShot outputs (PC8, PC9)
 - LIDAR UART RX (TFA300 on UART2 RX=PA3)
 - WiFi adapter UART (UART4 TX=PA0, RX=PA1)
