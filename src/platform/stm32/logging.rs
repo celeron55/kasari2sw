@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use core::fmt::Write;
 use cortex_m::interrupt::Mutex;
-use embassy_stm32::mode::Async;
+use embassy_stm32::mode::Blocking;
 use embassy_stm32::usart::Uart;
 use heapless::String;
 use log::{LevelFilter, Metadata, Record};
@@ -67,9 +67,9 @@ pub fn init_logger() {
     log::set_max_level(LevelFilter::Info);
 }
 
-// Task that drains the log ring buffer to UART
+// Task that drains the log ring buffer to UART (blocking mode to avoid DMA conflict with DShot)
 #[embassy_executor::task]
-pub async fn log_drain_task(mut uart: Uart<'static, Async>) -> ! {
+pub async fn log_drain_task(mut uart: Uart<'static, Blocking>) -> ! {
     use embassy_time::Timer;
 
     loop {
@@ -87,9 +87,9 @@ pub async fn log_drain_task(mut uart: Uart<'static, Async>) -> ! {
             }
         });
 
-        // Send to UART if we have data
+        // Send to UART if we have data (blocking write, no DMA)
         if !pending.is_empty() {
-            let _ = uart.write(&pending).await;
+            let _ = uart.blocking_write(&pending);
         }
 
         Timer::after_millis(10).await;

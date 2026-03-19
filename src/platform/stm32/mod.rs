@@ -137,7 +137,7 @@ async fn main(spawner: Spawner) {
 
     // Spawn log drain task to send buffered logs to UART4
     spawner.spawn(logging::log_drain_task(uart4)).unwrap();
-    info!("Logger initialized - logs streaming to UART4 (PA0 TX, PA1 RX, 115200 baud, DMA)");
+    info!("Logger initialized - logs streaming to UART4 (PA0 TX, PA1 RX, 115200 baud, blocking mode)");
 
     // ============================================================================
     // USB CDC LOGGING - Direct USB logging
