@@ -17,9 +17,11 @@ extern crate alloc;
 mod sensors;
 mod logging;
 mod panic_uart;
+mod usb_cdc;
 
 bind_interrupts!(struct Irqs {
     UART4 => UsartInterruptHandler<peripherals::UART4>;
+    OTG_FS => embassy_stm32::usb::InterruptHandler<peripherals::USB_OTG_FS>;
 });
 
 #[panic_handler]
@@ -131,6 +133,31 @@ async fn main(spawner: Spawner) {
     // Spawn log drain task to send buffered logs to UART4
     spawner.spawn(logging::log_drain_task(uart4)).unwrap();
     info!("Logger initialized - logs streaming to UART4 (PA0 TX, PA1 RX, 115200 baud, DMA)");
+
+    // ============================================================================
+    // USB CDC LOGGING - Direct USB logging
+    // ============================================================================
+
+    use embassy_stm32::usb::Driver;
+    use static_cell::StaticCell;
+
+    static USB_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
+
+    let mut usb_config = embassy_stm32::usb::Config::default();
+    usb_config.vbus_detection = false; // No VBUS detection (PA9 used for motor)
+
+    let usb_driver = Driver::new_fs(
+        p.USB_OTG_FS,
+        Irqs,
+        p.PA12, // D+
+        p.PA11, // D-
+        USB_EP_OUT_BUFFER.init([0u8; 1024]),
+        usb_config,
+    );
+
+    // Spawn USB CDC log drain task
+    spawner.spawn(usb_cdc::usb_cdc_log_drain_task(usb_driver)).unwrap();
+    info!("USB CDC initialized - logs also streaming to USB (PA12 D+, PA11 D-)");
 
     // ============================================================================
     // LED TEST - Mamba F722APP Status LEDs

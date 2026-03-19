@@ -22,7 +22,7 @@ required-features = ["rp2350"]
 # Flash: elf2uf2-rs convert --family rp2350-arm-s <elf> <uf2>, then copy to BOOTSEL device
 
 [features]
-stm32 = ["dep:defmt", "dep:log", "dep:embassy-stm32", "dep:embassy-net"]
+stm32 = ["dep:defmt", "dep:log", "dep:embassy-stm32", "dep:embassy-net", "dep:embassy-usb"]
 pc = ["critical-section/std"]
 rp2350 = ["dep:log", "dep:embassy-rp", "dep:cyw43", "dep:cyw43-pio", "dep:embassy-net"]
 
@@ -53,6 +53,7 @@ portable-atomic = { version = "1.13.1", features = ["critical-section"] }
 embassy-executor = { version = "0.9.1", features = ["arch-cortex-m", "executor-thread", "executor-interrupt"] }
 embassy-time = { version = "0.5.0", features = ["tick-hz-1_000_000"] }
 embassy-stm32 = { version = "0.5.0", features = ["stm32f722re", "time-driver-any", "exti", "memory-x", "unstable-pac"], optional = true }
+embassy-usb = { version = "0.5.0", optional = true }
 embassy-futures = "0.1.2"
 embassy-net = { version = "0.8.0", features = ["tcp", "udp", "dhcpv4", "medium-ethernet"], optional = true }
 embedded-io-async = "0.6.1"

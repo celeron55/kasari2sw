@@ -8,11 +8,17 @@ use log::{LevelFilter, Metadata, Record};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 
 const LOG_RING_SIZE: usize = 4096;
-static LOG_RING: Mutex<RefCell<ConstGenericRingBuffer<u8, LOG_RING_SIZE>>> =
+static LOG_RING_UART: Mutex<RefCell<ConstGenericRingBuffer<u8, LOG_RING_SIZE>>> =
+    Mutex::new(RefCell::new(ConstGenericRingBuffer::new()));
+static LOG_RING_USB: Mutex<RefCell<ConstGenericRingBuffer<u8, LOG_RING_SIZE>>> =
     Mutex::new(RefCell::new(ConstGenericRingBuffer::new()));
 
-pub fn get_ring_buffer() -> &'static Mutex<RefCell<ConstGenericRingBuffer<u8, LOG_RING_SIZE>>> {
-    &LOG_RING
+pub fn get_uart_ring_buffer() -> &'static Mutex<RefCell<ConstGenericRingBuffer<u8, LOG_RING_SIZE>>> {
+    &LOG_RING_UART
+}
+
+pub fn get_usb_ring_buffer() -> &'static Mutex<RefCell<ConstGenericRingBuffer<u8, LOG_RING_SIZE>>> {
+    &LOG_RING_USB
 }
 
 pub struct Logger;
@@ -36,9 +42,13 @@ impl log::Log for Logger {
             if writeln!(buf, "[{}] {}\r", level_str, record.args()).is_ok() {
                 let data = buf.as_bytes();
 
-                // Write to ring buffer for later consumption by UART task
+                // Write to both ring buffers for UART and USB tasks
                 cortex_m::interrupt::free(|cs| {
-                    LOG_RING
+                    LOG_RING_UART
+                        .borrow(cs)
+                        .borrow_mut()
+                        .extend(data.iter().copied());
+                    LOG_RING_USB
                         .borrow(cs)
                         .borrow_mut()
                         .extend(data.iter().copied());
@@ -67,7 +77,7 @@ pub async fn log_drain_task(mut uart: Uart<'static, Async>) -> ! {
         let mut pending: heapless::Vec<u8, 256> = heapless::Vec::new();
 
         cortex_m::interrupt::free(|cs| {
-            let mut ring = LOG_RING.borrow(cs).borrow_mut();
+            let mut ring = LOG_RING_UART.borrow(cs).borrow_mut();
             while pending.len() < pending.capacity() {
                 if let Some(byte) = ring.dequeue() {
                     let _ = pending.push(byte);
