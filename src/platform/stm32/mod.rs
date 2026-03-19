@@ -19,6 +19,8 @@ mod logging;
 mod panic_uart;
 mod usb_cdc;
 pub mod dshot;
+pub mod dshot_dma;
+// mod debug_uart;  // Commented out - not used
 
 bind_interrupts!(struct Irqs {
     UART4 => UsartInterruptHandler<peripherals::UART4>;
@@ -96,6 +98,8 @@ async fn main(spawner: Spawner) {
 
     let p = embassy_stm32::init(config);
 
+    // Removed debug pin test loop - it was blocking DShot initialization
+
     // Enable overdrive mode AFTER init for 216 MHz (>180 MHz requires this)
     // Embassy might have configured clocks but not enabled overdrive
     unsafe {
@@ -116,13 +120,13 @@ async fn main(spawner: Spawner) {
 
     let mut uart4_config = UartConfig::default();
     uart4_config.baudrate = 115200;
-    let uart4 = Uart::new(
+    // Create UART4 in blocking mode (no DMA) to free DMA1 Stream2 for TIM3_CH4
+    // UART4 RX can only use DMA1 Stream2, which conflicts with TIM3_CH4
+    // Since we need both DShot channels, UART4 must use blocking/interrupt mode
+    let uart4 = Uart::new_blocking(
         p.UART4,
-        p.PA1,  // RX
-        p.PA0,  // TX
-        Irqs,
-        p.DMA1_CH4,  // TX DMA
-        p.DMA1_CH2,  // RX DMA
+        p.PA1,  // RX (interrupt mode)
+        p.PA0,  // TX (interrupt mode)
         uart4_config,
     ).unwrap();
 
@@ -293,56 +297,26 @@ async fn main(spawner: Spawner) {
     // spawner.spawn(main_logic_task(main_logic, event_channel, motor_pwm)).unwrap();
 
     // ============================================================================
-    // DSHOT MOTOR CONTROL TEST
+    // DSHOT MOTOR CONTROL TEST (DMA version)
     // ============================================================================
 
-    let mut dshot = dshot::DShot::new();
-    dshot.init(dshot::DSHOT300_HZ);
-    info!("DShot initialized on TIM3 (PC8, PC9), 300 kbit/s");
+    let mut dshot_dma = dshot_dma::DShotDma::new();
+    dshot_dma.init();
 
-    // Send arming sequence: 0 throttle for 300ms
-    info!("Sending arming sequence (0 throttle for 300ms)...");
+    info!("Sending ESC arming sequence (throttle=0 for 300ms)...");
+    led_mcu.toggle();
     let arm_start = embassy_time::Instant::now();
     while arm_start.elapsed().as_millis() < 300 {
-        dshot.send_frame(0, 0);
+        let frame = dshot::throttle_to_dshot_frame(0, false);
+        dshot_dma.send_frame(frame, frame);
     }
-    info!("Arming sequence complete");
-
-    // Test with increasing throttle
-    info!("Testing motor output with throttle sweep...");
-
-    let mut counter = 0u32;
-    let mut throttle: u16 = 0;
-    let mut increasing = true;
+    led_mcu.toggle();
+    info!("ESC armed");
 
     loop {
-        // Send DShot frame at high rate
-        dshot.send_frame(throttle, throttle);
-
-        // Update throttle every ~50 frames
-        counter += 1;
-        if counter % 50 == 0 {
-            if increasing {
-                throttle += 48;
-                if throttle >= 1048 {
-                    increasing = false;
-                }
-            } else {
-                throttle = throttle.saturating_sub(48);
-                if throttle == 0 {
-                    increasing = true;
-                }
-            }
-            info!("Throttle: {} (frame {})", throttle, counter);
-        }
-
-        // Small delay between DShot frames
-        Timer::after_micros(200).await;
-
-        // Toggle LED every 1 second (500ms on/off)
-        if counter % 5000 == 0 {
-            led_mcu.toggle();
-        }
+        let frame = dshot::throttle_to_dshot_frame(500, false);
+        dshot_dma.send_frame(frame, frame);
+        Timer::after_millis(50).await;
     }
 }
 

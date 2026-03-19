@@ -174,12 +174,25 @@ impl DShot {
 }
 
 pub fn throttle_to_dshot_frame(throttle: u16, telemetry_req: bool) -> u16 {
-    let mut value = throttle & 0x07FF;
-    if telemetry_req {
-        value |= 0x0800;
+    // DShot packet format (MSB first):
+    // Bits 15-5: throttle value (11 bits)
+    // Bit 4: telemetry request
+    // Bits 3-0: checksum (4 bits)
+
+    // Step 1: Create 12-bit packet with throttle and telemetry bit
+    let mut packet = (throttle << 1) | if telemetry_req { 1 } else { 0 };
+
+    // Step 2: Compute checksum by XORing nibbles
+    let mut csum = 0u16;
+    let mut csum_data = packet;
+    for _ in 0..3 {
+        csum ^= csum_data;
+        csum_data >>= 4;
     }
-    let crc = ((value ^ (value >> 4) ^ (value >> 8)) & 0x0F) as u16;
-    value | (crc << 12)
+    csum &= 0xF;
+
+    // Step 3: Shift packet left 4 bits and append checksum
+    (packet << 4) | csum
 }
 
 pub fn speed_percent_to_dshot(speed_percent: f32) -> u16 {
@@ -268,17 +281,29 @@ mod tests {
     #[test]
     fn test_dshot_frame_crc() {
         let frame = throttle_to_dshot_frame(1000, false);
-        let crc = (frame >> 12) & 0x0F;
-        let expected_crc =
-            ((frame & 0x07FF) ^ ((frame & 0x07FF) >> 4) ^ ((frame & 0x07FF) >> 8)) & 0x0F;
-        assert_eq!(crc as u16, expected_crc);
+        let crc = frame & 0x0F;
+
+        // Extract 12-bit packet (bits 15-4)
+        let packet = frame >> 4;
+
+        // Compute expected checksum
+        let mut expected_crc = 0u16;
+        let mut csum_data = packet;
+        for _ in 0..3 {
+            expected_crc ^= csum_data;
+            csum_data >>= 4;
+        }
+        expected_crc &= 0x0F;
+
+        assert_eq!(crc, expected_crc);
     }
 
     #[test]
     fn test_disarmed_frame_is_zero_except_crc() {
         let frame = throttle_to_dshot_frame(0, false);
-        let crc = (frame >> 12) & 0x0F;
-        assert_eq!(crc, 0xF);
+        // For throttle=0, telemetry=false: packet = (0 << 1) | 0 = 0
+        // Checksum of 0 XOR 0 XOR 0 = 0
+        assert_eq!(frame, 0x0000);
     }
 
     #[test]
@@ -296,5 +321,18 @@ mod tests {
         for i in 0..16 {
             assert_eq!(buffer[i], MOTOR_BIT_0, "Bit {} should be 0", i);
         }
+    }
+
+    #[test]
+    fn test_betaflight_compatible_frame() {
+        // Test case from Betaflight: throttle=500, telemetry=true
+        // packet = (500 << 1) | 1 = 0x3E9
+        // checksum nibbles: 0x3E9 ^ 0x3E ^ 0x3 = 0x4
+        // final frame = (0x3E9 << 4) | 0x4 = 0x3E94
+        let frame = throttle_to_dshot_frame(500, true);
+        assert_eq!(frame, 0x3E94, "Frame should match Betaflight format");
+
+        // Verify bit pattern: 0011 1110 1001 0100
+        // which sends: 0 0 1 1  1 1 1 0  1 0 0 1  0 1 0 0 (MSB first)
     }
 }
