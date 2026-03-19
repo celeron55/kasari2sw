@@ -6,18 +6,41 @@ use embassy_stm32::{
     bind_interrupts,
     gpio::{Level, Output, Speed},
     peripherals,
+    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, Uart},
     Config,
 };
 use embassy_time::Timer;
-use defmt::*;
-use {defmt_rtt as _, panic_probe as _};
+use log::info;
 
 extern crate alloc;
-use core::alloc::Layout;
 
 mod sensors;
-use kasarisw::shared;
-use kasarisw::shared::kasari;
+mod logging;
+mod panic_uart;
+
+bind_interrupts!(struct Irqs {
+    UART4 => UsartInterruptHandler<peripherals::UART4>;
+});
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    panic_uart::init();
+    panic_uart::write("\r\n\r\n=== PANIC ===\r\n");
+
+    if let Some(location) = info.location() {
+        panic_uart::write("Location: ");
+        panic_uart::write(location.file());
+        panic_uart::write(":");
+        panic_uart::write_decimal(location.line() as u32);
+        panic_uart::write("\r\n");
+    }
+
+    panic_uart::write("\r\nHalting...\r\n");
+
+    loop {
+        cortex_m::asm::wfi();
+    }
+}
 
 // Global allocator for STM32
 #[global_allocator]
@@ -39,13 +62,11 @@ fn target_speed_to_pwm_duty(speed_percent: f32, duty_range: u32) -> u32 {
 }
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     // Initialize heap
     unsafe {
         ALLOCATOR.init(&mut HEAP as *const u8 as usize, HEAP_SIZE);
     }
-
-    info!("Kasari2sw STM32F722 starting...");
 
     // Configure STM32F722 system clock
     let mut config = Config::default();
@@ -86,7 +107,30 @@ async fn main(_spawner: Spawner) {
         while !pac::PWR.csr1().read().odswrdy() {}
     }
 
+    // ============================================================================
+    // UART4 LOGGING - WiFi adapter port (PA0=TX, PA1=RX, 115200 baud)
+    // ============================================================================
+
+    let mut uart4_config = UartConfig::default();
+    uart4_config.baudrate = 115200;
+    let uart4 = Uart::new(
+        p.UART4,
+        p.PA1,  // RX
+        p.PA0,  // TX
+        Irqs,
+        p.DMA1_CH4,  // TX DMA
+        p.DMA1_CH2,  // RX DMA
+        uart4_config,
+    ).unwrap();
+
+    // Initialize logger (buffered to ring buffer)
+    logging::init_logger();
+    info!("Kasari2sw STM32F722 starting...");
     info!("STM32F722 initialized at 216 MHz (8 MHz HSE, overdrive enabled)");
+
+    // Spawn log drain task to send buffered logs to UART4
+    spawner.spawn(logging::log_drain_task(uart4)).unwrap();
+    info!("Logger initialized - logs streaming to UART4 (PA0 TX, PA1 RX, 115200 baud, DMA)");
 
     // ============================================================================
     // LED TEST - Mamba F722APP Status LEDs
@@ -236,8 +280,11 @@ async fn main(_spawner: Spawner) {
     // Active-low: HIGH = OFF, LOW = ON
     led_gyro.set_high();  // OFF
 
+    let mut counter = 0u32;
     loop {
         led_mcu.toggle();
+        info!("Heartbeat {} - LED toggled", counter);
+        counter = counter.wrapping_add(1);
         Timer::after_millis(500).await;
     }
 }

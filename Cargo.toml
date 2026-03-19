@@ -22,7 +22,7 @@ required-features = ["rp2350"]
 # Flash: elf2uf2-rs convert --family rp2350-arm-s <elf> <uf2>, then copy to BOOTSEL device
 
 [features]
-stm32 = ["dep:defmt", "dep:embassy-stm32", "dep:embassy-net"]
+stm32 = ["dep:defmt", "dep:log", "dep:embassy-stm32", "dep:embassy-net"]
 pc = ["critical-section/std"]
 rp2350 = ["dep:log", "dep:embassy-rp", "dep:cyw43", "dep:cyw43-pio", "dep:embassy-net"]
 
