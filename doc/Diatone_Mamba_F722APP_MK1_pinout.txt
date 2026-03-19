@@ -76,8 +76,8 @@ CURR: PC3 (ADC3_IN13, current sensor)
 
 GPIO:
 =====
-LED0:       PC15 (status LED)
-LED1:       PC14 (status LED)
+LED0:       PC15 (GYRO status LED, blue, active-low)
+LED1:       PC14 (MCU status LED, orange, active-low)
 BEEPER:     PB2 (inverted logic)
 LED_STRIP:  PB3 (WS2812B addressable LEDs)
 PINIO1:     PB0 (programmable IO, box 0, config 129)
