@@ -240,6 +240,7 @@ impl Robot {
                     resolve_dy = pen_y_top;
                     normal_y = 1.0;
                 }
+                let _ = min_pen; // Suppress unused assignment warning
 
                 self.pos_x += resolve_dx;
                 self.pos_y += resolve_dy;

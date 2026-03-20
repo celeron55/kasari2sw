@@ -3,19 +3,16 @@ use crate::events::{get_ts, parse_event};
 use crate::physics::{Rect, Robot, World};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
-use kasarisw::shared::algorithm::{BIN_ANGLE_STEP, NUM_BINS};
 use kasarisw::shared::kasari;
-use kasarisw::shared::kasari::{InputEvent, MainLogic, MotorControlPlan};
+use kasarisw::shared::kasari::{InputEvent, MainLogic};
 use kasarisw::shared::rem_euclid_f32;
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use static_cell::StaticCell;
 use std::collections::VecDeque;
-use std::error::Error;
 use std::f32::consts::PI;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, Error as IoError};
+use std::io::Error as IoError;
 use std::iter::Iterator;
 
 pub trait EventSource {
@@ -39,7 +36,7 @@ pub trait EventSource {
     fn get_robot_flipped(&self) -> bool {
         false
     }
-    fn set_robot_flipped(&mut self, robot_flipped: bool) {}
+    fn set_robot_flipped(&mut self, _robot_flipped: bool) {}
     fn inject_event(&mut self, event: InputEvent) {
         self.get_logic_mut().unwrap().feed_event(event);
     }
@@ -47,17 +44,17 @@ pub trait EventSource {
 
 struct ReplayMirror {
     logic: MainLogic,
-    debug: bool,
+    _debug: bool,
 }
 
 impl ReplayMirror {
     pub fn new(debug: bool, reverse_rotation: bool) -> Self {
         Self {
             logic: MainLogic::new(reverse_rotation),
-            debug: debug,
+            _debug: debug,
         }
     }
-    pub fn process_event(&mut self, timestamp: u64, event: &InputEvent) {
+    pub fn process_event(&mut self, _timestamp: u64, event: &InputEvent) {
         self.logic.feed_event(event.clone());
     }
 }
@@ -113,8 +110,7 @@ impl FileEventSource {
                                 let mut adjusted_ts = get_ts(&event);
                                 if matches!(&event, InputEvent::WifiControl(..)) {
                                     if let Some(last) = self.last_read_ts {
-                                        if ((adjusted_ts as i128 - last as i128).abs() > 5_000_000)
-                                        {
+                                        if (adjusted_ts as i128 - last as i128).abs() > 5_000_000 {
                                             adjusted_ts = last + 1000;
                                         }
                                     }
@@ -269,15 +265,15 @@ impl EventSource for FileEventSource {
     }
 }
 
-static CHANNEL: StaticCell<PubSubChannel<CriticalSectionRawMutex, InputEvent, 32, 3, 6>> =
+static CHANNEL: StaticCell<PubSubChannel<CriticalSectionRawMutex, InputEvent, 64, 3, 6>> =
     StaticCell::new();
 
 pub struct SimEventSource {
     control_logic: MainLogic,
     control_publisher:
-        embassy_sync::pubsub::Publisher<'static, CriticalSectionRawMutex, InputEvent, 32, 3, 6>,
+        embassy_sync::pubsub::Publisher<'static, CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
     control_subscriber:
-        embassy_sync::pubsub::Subscriber<'static, CriticalSectionRawMutex, InputEvent, 32, 3, 6>,
+        embassy_sync::pubsub::Subscriber<'static, CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
     event_buffer: VecDeque<InputEvent>,
     modulator: kasari::MotorModulator,
     robot: Robot,

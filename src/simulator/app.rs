@@ -1,6 +1,5 @@
 // simulator/app.rs
-use crate::events::get_ts;
-use crate::physics::{Rect, Robot, World};
+use crate::physics::Rect;
 use crate::sources::EventSource;
 use crate::sources::FileEventSource;
 use crate::sources::SimEventSource;
@@ -9,8 +8,7 @@ use crossbeam_channel::{Receiver, Sender};
 use eframe::egui::{self, TextStyle};
 use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
 use kasarisw::shared::algorithm::{BIN_ANGLE_STEP, NUM_BINS};
-use kasarisw::shared::kasari::{InputEvent, MainLogic, MotorControlPlan};
-use num_traits::ops::euclid::Euclid;
+use kasarisw::shared::kasari::InputEvent;
 use std::io::Error as IoError;
 use std::time::Instant;
 
@@ -97,7 +95,7 @@ impl MyApp {
     }
 
     pub fn process_event(&mut self, event: &InputEvent) {
-        if let InputEvent::Planner(ts, plan, cw, os, op, theta, rpm) = event {
+        if let InputEvent::Planner(ts, plan, _cw, _os, _op, theta, rpm) = event {
             self.theta_offset = self.event_source.get_logic().unwrap().detector.theta - *theta;
             self.latest_planner = Some(event.clone());
             self.show_planner_theta = true;
@@ -105,10 +103,10 @@ impl MyApp {
                 println!("Processed Planner ts={} plan={:?} theta={:.4} (sim: {:.4}) rpm={:.2} (sim: {:.2})", ts, plan, *theta, self.event_source.get_logic().unwrap().detector.theta, rpm, self.event_source.get_logic().unwrap().detector.rpm);
             }
         }
-        if let InputEvent::Stats(ts, stats) = event {
+        if let InputEvent::Stats(_ts, _stats) = event {
             self.latest_stats = Some(event.clone());
         }
-        if let InputEvent::Vbat(ts, voltage) = event {
+        if let InputEvent::Vbat(_ts, voltage) = event {
             self.latest_vbat = *voltage;
         }
         if matches!(event, InputEvent::Lidar(..)) {
@@ -876,7 +874,7 @@ impl eframe::App for MyApp {
                 // Draw detection and movement vectors as large dots after rotation
                 let dot_radius = 10.0;
                 if let Some(event) = &self.latest_planner {
-                    if let InputEvent::Planner(ts, plan, cw, os, op, theta, rpm) = event {
+                    if let InputEvent::Planner(_ts, plan, cw, os, op, theta, _rpm) = event {
                         let offset = self.theta_offset;
 
                         if plan.movement_x != 0.0 || plan.movement_y != 0.0 {
