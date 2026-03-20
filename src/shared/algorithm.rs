@@ -1,11 +1,9 @@
 // shared/algorithm.rs
-#![no_std]
 
 use crate::shared::rem_euclid_f32;
 use arrayvec::ArrayVec;
 use core::f32::consts::PI;
-use libm::{cosf, fabsf, sinf, sqrtf};
-use num_traits::float::FloatCore;
+use libm::{cosf, fabsf, floorf, sinf, sqrtf};
 
 pub const NUM_BINS: usize = 90; // 4° per bin
 pub const BIN_ANGLE_STEP: f32 = 2.0 * PI / NUM_BINS as f32;
@@ -21,9 +19,9 @@ static TABLE_INIT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBo
 fn approx_sin(angle: f32) -> f32 {
     let norm = rem_euclid_f32(angle, 2.0 * PI) / (2.0 * PI);
     let f = norm * TABLE_SIZE as f32;
-    let low = f.floor() as usize % TABLE_SIZE;
+    let low = floorf(f) as usize % TABLE_SIZE;
     let high = (low + 1) % TABLE_SIZE;
-    let frac = f - f.floor();
+    let frac = f - floorf(f);
     unsafe { SIN_TABLE[low] * (1.0 - frac) + SIN_TABLE[high] * frac }
 }
 
@@ -63,7 +61,7 @@ pub struct ObjectDetector {
 
 impl ObjectDetector {
     pub fn new() -> Self {
-        let mut bins_dist = [f32::INFINITY; NUM_BINS];
+        let bins_dist = [f32::INFINITY; NUM_BINS];
         Self {
             theta: 0.0,
             rpm: 0.0,
@@ -246,7 +244,7 @@ impl ObjectDetector {
         self.bins_dist.iter().filter(|&&d| d.is_finite()).count()
     }
 
-    pub fn detect_objects(&mut self, debug: bool) -> DetectionResult {
+    pub fn detect_objects(&mut self, _debug: bool) -> DetectionResult {
         let n = NUM_BINS;
         let wall_window_size = 5.max(n / 12).min(15); // Reduced max
 
@@ -298,7 +296,7 @@ impl ObjectDetector {
             let next_i = (i + 1) % n;
             let diff = fabsf(avgs[next_i] - avgs[i]);
             if diff > 80.0 {
-                large_changes.try_push((diff, i));
+                let _ = large_changes.try_push((diff, i));
             }
         }
 
@@ -316,8 +314,8 @@ impl ObjectDetector {
             // Paired on limited changes
             for i in 0..large_changes.len() {
                 for j in (i + 1)..large_changes.len() {
-                    let mut idx1 = large_changes[i].1;
-                    let mut idx2 = large_changes[j].1;
+                    let idx1 = large_changes[i].1;
+                    let idx2 = large_changes[j].1;
                     let (min_idx, max_idx) = if idx1 < idx2 {
                         (idx1, idx2)
                     } else {
@@ -354,17 +352,15 @@ impl ObjectDetector {
             }
 
             // Single
-            for &(dist_diff, mut idx) in &large_changes {
+            for &(dist_diff, idx) in &large_changes {
                 if dist_diff < 130.0 {
                     continue;
                 }
                 let mut local_idx2 = (idx + 1) % n;
                 let mut local_idx1 = idx;
                 let mut local_depth = avgs[local_idx2] - avgs[local_idx1];
-                let mut local_is_flipped = false;
                 if local_depth < -130.0 {
                     local_depth = -local_depth;
-                    local_is_flipped = true;
                     core::mem::swap(&mut local_idx1, &mut local_idx2);
                 } else if local_depth < 130.0 {
                     continue;
@@ -525,8 +521,6 @@ impl ObjectDetector {
 
         // Position and velocity estimation (simplified, no rotation fit)
         let mut wall_distances = (0.0, 0.0, 0.0, 0.0);
-        let mut position = (self.pos_x, self.pos_y);
-        let mut velocity = self.velocity;
         let mut open_space = fallback_open_space;
 
         if self.bin_count() > 80 && self.last_ts.is_some() {

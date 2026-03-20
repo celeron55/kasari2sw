@@ -1,13 +1,10 @@
 // shared/mod.rs
-#![cfg_attr(target_os = "none", no_std)]
-use core::cell::RefCell;
-use critical_section::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::PubSubChannel;
-use num_traits::float::FloatCore;
-use num_traits::ops::euclid::Euclid;
-use ringbuffer::ConstGenericRingBuffer;
 use static_cell::StaticCell;
+
+#[cfg(target_os = "none")]
+use num_traits::ops::euclid::Euclid;
 
 #[cfg(target_os = "none")]
 use embassy_time::Instant;
@@ -15,7 +12,7 @@ use embassy_time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod algorithm;
-use algorithm::{DetectionResult, ObjectDetector};
+use algorithm::ObjectDetector;
 
 pub const TARGET_RPM: f32 = 1200.0;
 pub const MIN_MOVE_RPM: f32 = 550.0;
@@ -75,8 +72,8 @@ pub mod kasari {
     use crate::shared::CriticalSectionRawMutex;
     use crate::shared::ObjectDetector;
     use crate::shared::{
-        get_current_timestamp, FAILSAFE_TIMEOUT_US, LOG_DETECTION, LOG_RECEIVER, LOG_VBAT,
-        LOG_WIFI_CONTROL, MAX_RPM_RAMP_RATE, MIN_ATTACK_RPM, MIN_MOVE_RPM, MOVEMENT_SPEED_ATTACK,
+        get_current_timestamp, FAILSAFE_TIMEOUT_US, LOG_RECEIVER, LOG_VBAT, LOG_WIFI_CONTROL,
+        MAX_RPM_RAMP_RATE, MIN_ATTACK_RPM, MIN_MOVE_RPM, MOVEMENT_SPEED_ATTACK,
         MOVEMENT_SPEED_CENTER, REVERSE_ROTATION_MAX_RPM, RPM_INITIAL_JUMP, TARGET_RPM,
     };
     #[cfg(target_os = "none")]
@@ -91,9 +88,8 @@ pub mod kasari {
         };
     }
     use libm::{atan2f, cosf, fabsf, sqrtf};
+    #[cfg(target_os = "none")]
     use num_traits::float::FloatCore;
-    #[cfg(all(target_os = "none", target_arch = "arm"))]
-    use println;
     #[cfg(not(target_os = "none"))]
     use std::vec::Vec; // powi on esp32
 
@@ -387,7 +383,6 @@ pub mod kasari {
             let wall_dist = sqrtf(wall_x * wall_x + wall_y * wall_y);
             let obj_x = self.detection_state.object_pos.0;
             let obj_y = self.detection_state.object_pos.1;
-            let obj_dist = sqrtf(obj_x * obj_x + obj_y * obj_y);
 
             let detection_failing = self.detector.arena_w == 0.0 || obj_x == 100.0;
 
@@ -695,10 +690,10 @@ pub mod kasari {
                 }
 
                 const D: f32 = 250.0;
-                if (self.detection_state.wall_distances.0 > D
+                if self.detection_state.wall_distances.0 > D
                     && self.detection_state.wall_distances.1 > D
                     && self.detection_state.wall_distances.2 > D
-                    && self.detection_state.wall_distances.3 > D)
+                    && self.detection_state.wall_distances.3 > D
                 {
                     self.away_from_wall_timestamp = timestamp;
                 } else {
@@ -933,7 +928,7 @@ pub mod kasari {
     pub struct MotorModulator {
         last_ts: u64,
         theta: f32,
-        rpm: f32,
+        _rpm: f32,
         pub mcp: Option<MotorControlPlan>,
         angular_correction: f32,
     }
@@ -943,7 +938,7 @@ pub mod kasari {
             Self {
                 last_ts: 0,
                 theta: 0.0,
-                rpm: 0.0,
+                _rpm: 0.0,
                 mcp: None,
                 angular_correction: 0.0,
             }
@@ -978,7 +973,6 @@ pub mod kasari {
                 }
             }
 
-            let target_rotation_speed = self.mcp.as_ref().map_or(0.0, |p| p.rotation_speed);
             let target_movement_x = self.mcp.as_ref().map_or(0.0, |p| p.movement_x);
             let target_movement_y = self.mcp.as_ref().map_or(0.0, |p| p.movement_y);
 

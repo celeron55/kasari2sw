@@ -16,13 +16,18 @@ const TEIF7: u32 = 1 << 25;
 const TCIF2: u32 = 1 << 21;
 const TEIF2: u32 = 1 << 19;
 
-const ALL_FLAGS7: u32 = 0x0FC00000;  // Clear all Stream7 flags
-const ALL_FLAGS2: u32 = 0x003D0000;  // Clear all Stream2 flags
+const ALL_FLAGS7: u32 = 0x0FC00000; // Clear all Stream7 flags
+const ALL_FLAGS2: u32 = 0x003D0000; // Clear all Stream2 flags
 
+#[allow(non_upper_case_globals)]
 const DMA_SxCR: u32 = 0x00;
+#[allow(non_upper_case_globals)]
 const DMA_SxNDTR: u32 = 0x04;
+#[allow(non_upper_case_globals)]
 const DMA_SxPAR: u32 = 0x08;
+#[allow(non_upper_case_globals)]
 const DMA_SxM0AR: u32 = 0x0C;
+#[allow(non_upper_case_globals)]
 const DMA_SxFCR: u32 = 0x10;
 
 const DMA1_STREAM7_BASE: u32 = DMA1_BASE + 0x0B8;
@@ -89,7 +94,10 @@ impl DShotDma {
             core::ptr::write_volatile(0x4002_0824 as *mut u32, (afrh & 0xFFFF_FF00) | 0x22);
 
             let ospeedr = core::ptr::read_volatile(0x4002_0808 as *mut u32);
-            core::ptr::write_volatile(0x4002_0808 as *mut u32, (ospeedr & 0xFFF0_FFFF) | 0x000A_0000);
+            core::ptr::write_volatile(
+                0x4002_0808 as *mut u32,
+                (ospeedr & 0xFFF0_FFFF) | 0x000A_0000,
+            );
 
             // Configure TIM3: prescaler, period, PWM mode, output enable
             core::ptr::write_volatile(TIM3_CR1 as *mut u32, 0);
@@ -119,8 +127,11 @@ impl DShotDma {
             core::ptr::write_volatile(DMA_LIFCR as *mut u32, ALL_FLAGS2);
 
             // Configure DMA: channel 5, memory increment, 32-bit, memory-to-peripheral
-            let dma_cr =
-                CHSEL_CHANNEL_5 | DMA_CR_MINC | DMA_CR_PSIZE_WORD | DMA_CR_MSIZE_WORD | DMA_CR_DIR_0;
+            let dma_cr = CHSEL_CHANNEL_5
+                | DMA_CR_MINC
+                | DMA_CR_PSIZE_WORD
+                | DMA_CR_MSIZE_WORD
+                | DMA_CR_DIR_0;
 
             core::ptr::write_volatile((self.dma_stream7 + DMA_SxCR) as *mut u32, dma_cr);
             core::ptr::write_volatile((self.dma_stream7 + DMA_SxPAR) as *mut u32, TIM3_CCR3);
@@ -181,8 +192,12 @@ impl DShotDma {
                 loop {
                     let hisr = core::ptr::read_volatile(DMA_HISR as *const u32);
                     let lisr = core::ptr::read_volatile(DMA_LISR as *const u32);
-                    if (hisr & TCIF7) != 0 && (lisr & TCIF2) != 0 { break; }
-                    if (hisr & TEIF7) != 0 || (lisr & TEIF2) != 0 { break; }
+                    if (hisr & TCIF7) != 0 && (lisr & TCIF2) != 0 {
+                        break;
+                    }
+                    if (hisr & TEIF7) != 0 || (lisr & TEIF2) != 0 {
+                        break;
+                    }
                 }
             }
 
@@ -215,7 +230,12 @@ impl DShotDma {
             core::ptr::write_volatile((TIM3_BASE + 0x14) as *mut u32, 0x1);
 
             // Enable DMA streams
-            let cr = CHSEL_CHANNEL_5 | DMA_CR_MINC | DMA_CR_PSIZE_WORD | DMA_CR_MSIZE_WORD | DMA_CR_DIR_0 | DMA_CR_EN;
+            let cr = CHSEL_CHANNEL_5
+                | DMA_CR_MINC
+                | DMA_CR_PSIZE_WORD
+                | DMA_CR_MSIZE_WORD
+                | DMA_CR_DIR_0
+                | DMA_CR_EN;
             core::ptr::write_volatile((self.dma_stream7 + DMA_SxCR) as *mut u32, cr);
             core::ptr::write_volatile((self.dma_stream2 + DMA_SxCR) as *mut u32, cr);
 
