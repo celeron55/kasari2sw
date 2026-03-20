@@ -1,11 +1,14 @@
 use core::fmt::Write;
-use embassy_stm32::mode::Blocking;
-use embassy_stm32::usart::UartTx;
+use embassy_stm32::usart::{BufferedUartRx, BufferedUartTx};
 use heapless::String;
 use log::{LevelFilter, Metadata, Record};
 use ringbuffer::RingBuffer;
 
 use crate::console::{get_uart_console, get_usb_console, ConsoleMutex};
+
+// Import traits for BufferedUart read/write
+use embedded_io_async::Read as AsyncRead;
+use embedded_io_async::Write as AsyncWrite;
 
 pub struct Logger;
 
@@ -54,31 +57,41 @@ pub fn init_logger() {
 }
 
 /// UART console task - handles TX drain and RX command processing
+/// Uses interrupt-driven BufferedUart for reliable high-speed RX
 #[embassy_executor::task]
 pub async fn uart_console_task(
-    mut tx: UartTx<'static, Blocking>,
+    mut tx: BufferedUartTx<'static>,
+    mut rx: BufferedUartRx<'static>,
     console: &'static ConsoleMutex,
 ) -> ! {
-    use embassy_time::Timer;
+    use embassy_futures::select::{select, Either};
+    use embassy_time::{Duration, Timer};
 
     loop {
-        // 1. Poll for RX data (non-blocking check via PAC)
-        unsafe {
-            use embassy_stm32::pac;
-            let isr = pac::UART4.isr().read();
-            if isr.rxne() {
-                let byte = pac::UART4.rdr().read().dr() as u8;
+        // Wait for either RX data or timeout (for TX drain)
+        let mut rx_buf = [0u8; 32];
+        let rx_fut = AsyncRead::read(&mut rx, &mut rx_buf);
+        let timeout_fut = Timer::after(Duration::from_millis(10));
+
+        match select(rx_fut, timeout_fut).await {
+            Either::First(Ok(n)) if n > 0 => {
+                // Process received bytes
                 cortex_m::interrupt::free(|cs| {
                     let mut state = console.borrow(cs).borrow_mut();
-                    if let Some(cmd) = state.process_rx_byte(byte) {
-                        let response = state.execute_command(&cmd);
-                        state.write_bytes(response.as_bytes());
+                    for &byte in &rx_buf[..n] {
+                        if let Some(cmd) = state.process_rx_byte(byte) {
+                            let response = state.execute_command(&cmd);
+                            state.write_bytes(response.as_bytes());
+                        }
                     }
                 });
             }
+            _ => {
+                // Timeout or error - continue with TX drain
+            }
         }
 
-        // 2. Drain output ring buffer to TX
+        // Drain output ring buffer to TX
         let mut pending: heapless::Vec<u8, 256> = heapless::Vec::new();
 
         cortex_m::interrupt::free(|cs| {
@@ -93,9 +106,7 @@ pub async fn uart_console_task(
         });
 
         if !pending.is_empty() {
-            let _ = tx.blocking_write(&pending);
+            let _ = AsyncWrite::write_all(&mut tx, &pending).await;
         }
-
-        Timer::after_millis(10).await;
     }
 }

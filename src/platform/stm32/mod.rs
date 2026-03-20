@@ -6,7 +6,7 @@ use embassy_stm32::{
     bind_interrupts,
     gpio::{Level, Output, Speed},
     peripherals,
-    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, Uart, RingBufferedUartRx},
+    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, BufferedInterruptHandler, Uart, BufferedUart, RingBufferedUartRx},
     Config,
 };
 use static_cell::StaticCell;
@@ -27,7 +27,7 @@ pub mod dshot_dma;
 use kasarisw::shared::kasari::{InputEvent, MainLogic, MotorModulator};
 
 bind_interrupts!(struct Irqs {
-    UART4 => UsartInterruptHandler<peripherals::UART4>;
+    UART4 => BufferedInterruptHandler<peripherals::UART4>;
     USART2 => UsartInterruptHandler<peripherals::USART2>;
     OTG_FS => embassy_stm32::usb::InterruptHandler<peripherals::USB_OTG_FS>;
 });
@@ -129,28 +129,31 @@ async fn main(spawner: Spawner) {
     // UART4 CONSOLE - WiFi adapter port (PA0=TX, PA1=RX, 115200 baud)
     // ============================================================================
 
+    // Buffered UART uses interrupts (not DMA) - no conflict with DShot
+    static UART4_TX_BUF: StaticCell<[u8; 256]> = StaticCell::new();
+    static UART4_RX_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+
     let mut uart4_config = UartConfig::default();
     uart4_config.baudrate = 115200;
-    // Create UART4 in blocking mode (no DMA) to free DMA1 Stream2 for TIM3_CH4
-    // UART4 RX can only use DMA1 Stream2, which conflicts with TIM3_CH4
-    // Since we need both DShot channels, UART4 must use blocking/interrupt mode
-    let uart4 = Uart::new_blocking(
+    let uart4 = BufferedUart::new(
         p.UART4,
-        p.PA1,  // RX (polled via PAC in console task)
-        p.PA0,  // TX (blocking write)
+        p.PA1,  // RX
+        p.PA0,  // TX
+        UART4_TX_BUF.init([0u8; 256]),
+        UART4_RX_BUF.init([0u8; 64]),
+        Irqs,
         uart4_config,
     ).unwrap();
-    // Split UART4 - we only use TX, RX is polled via PAC registers
-    let (uart4_tx, _uart4_rx) = uart4.split();
+    let (uart4_tx, uart4_rx) = uart4.split();
 
     // Initialize logger (writes to console buffers)
     logging::init_logger();
     info!("Kasari2sw STM32F722 starting...");
     info!("STM32F722 initialized at 216 MHz (8 MHz HSE, overdrive enabled)");
 
-    // Spawn UART console task (TX drain + RX command polling)
-    spawner.spawn(logging::uart_console_task(uart4_tx, uart_console)).unwrap();
-    info!("UART4 console initialized (PA0 TX, PA1 RX, 115200 baud)");
+    // Spawn UART console task (async TX/RX via interrupts)
+    spawner.spawn(logging::uart_console_task(uart4_tx, uart4_rx, uart_console)).unwrap();
+    info!("UART4 console initialized (PA0 TX, PA1 RX, 115200 baud, interrupt-driven)");
 
     // ============================================================================
     // USB CDC CONSOLE - Direct USB serial
