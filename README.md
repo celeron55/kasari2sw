@@ -191,19 +191,18 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 
 ### Hardware Modifications
 
-**OSD Chip Removal (MAX7456/AT7456E):**
-- The onboard OSD chip is desoldered to free up SPI2 pins
-- SPI2 pins are rewired to connect external ADXL373 accelerometer
-- This modification is required as the robot doesn't need video OSD functionality
-- The freed SPI2 bus provides dedicated hardware SPI for the accelerometer
+**ADXL373 Accelerometer (Bit-bang SPI):**
+- Uses available pads on the FC, no desoldering required
+- Bit-bang SPI is sufficient for 100 Hz sampling rate
 
-**AT7456E Chip Pin Numbers** (for desoldering reference):
-- Pin 8:  CS (connect to ADXL373 CS)
-- Pin 9:  SDIN/MOSI (connect to ADXL373 SDI)
-- Pin 10: SCLK (connect to ADXL373 SCLK)
-- Pin 11: SDOUT/MISO (connect to ADXL373 SDO)
+| Signal | Pin | Pad Label | Direction |
+|--------|-----|-----------|-----------|
+| CS | PC12 | TX5 | Output |
+| SCK | PB3 | LED | Output |
+| MISO | PC2 | RSSI | Input (from ADXL373 SDO) |
+| MOSI | PD2 | RX5 | Output (to ADXL373 SDI) |
 
-**Note**: ADXL373 VDD (3.3V) and GND are connected to marked power pins elsewhere on the FC board, not from the OSD chip location.
+**Note**: ADXL373 VDD (3.3V) and GND are connected to marked power pins on the FC board.
 
 ### Peripherals
 
@@ -214,8 +213,8 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 - MOTOR4: PA9 (TIM1_CH2) - unused
 
 **UARTs** (board default connections):
-- UART1: TX=PB6, RX=PB7 (Receiver port - **RC receiver input**, PB7 also has TIM4_CH2)
-- UART2: TX=PA2, RX=PA3 (Vacant - **LIDAR TFA300 on RX**)
+- UART1: TX=PB6, RX=PB7 (**RC receiver** - bidirectional, PB7 also has TIM4_CH2)
+- UART2: TX=PA2, RX=PA3 (**LIDAR TFA300** - bidirectional for config/data)
 - UART3: TX=PB10, RX=PB11 (VTX port - **available**, no video transmitter)
 - UART4: TX=PA0, RX=PA1 (**WiFi adapter - connected on board**)
 - UART5: TX=PC12, RX=PD2 (F.Port - **available** unless using F.Port)
@@ -230,9 +229,7 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 
 **SPI**:
 - SPI1 (Onboard MPU6000 gyro): CS=PA4, SCK=PA5, MISO=PA6, MOSI=PA7, EXTI=PC4
-- SPI2 (External ADXL373 accelerometer): CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15
-  - Originally connected to MAX7456 OSD (desoldered)
-  - Rewired to ADXL373 accelerometer module
+- SPI2 (Onboard MAX7456 OSD): CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15 - unused
 - SPI3 (Onboard W25Q128FV flash): CS=PA15, SCK=PC10, MISO=PC11, MOSI=PB5
 
 **I2C**:
@@ -252,36 +249,37 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 
 **Onboard Hardware**:
 - Gyroscope: MPU6000 (SPI1) - unused
-- OSD: AT7456E/MAX7456 (SPI2) - **REMOVED** (desoldered)
+- OSD: AT7456E/MAX7456 (SPI2) - unused
 - Flash: W25Q128FV 128Mbit (SPI3)
 - Barometer: None
 
 **External Hardware**:
-- Accelerometer: ADXL373 (SPI2) - wired to freed OSD pins
+- Accelerometer: ADXL373 (bit-bang SPI on PC12/PB3/PC2/PD2)
 - LIDAR: Benewake TFA300 (UART2 RX=PA3)
 - RC Receiver: 1 channel on UART1 RX=PB7 (TIM4_CH2 for input capture)
 - Motors: 2x ESCs via DShot (PC8, PC9)
 - WiFi: UART-to-WiFi adapter (UART4)
 
 **TFA300 LIDAR Connector Pinout** (JST GH 6-pin):
-- Blue: UART_Rx (connects to STM32 TX - unused)
-- Brown: UART_Tx (connects to STM32 RX - UART2 RX=PA3)
+- Blue: UART_Rx (connects to STM32 TX - UART2 TX=PA2, for configuration)
+- Brown: UART_Tx (connects to STM32 RX - UART2 RX=PA3, distance data)
 - White: CAN_L (unused)
 - Green: CAN_H (unused)
 - Red: VCC (5V ±10%)
 - Black: GND
 
 **RC Receiver Wiring**:
-- Signal: Connect to PB7 (UART1 RX pad, will use TIM4_CH2 for input capture)
+- Signal TX: Connect to PB6 (UART1 TX pad, for protocols requiring TX)
+- Signal RX: Connect to PB7 (UART1 RX pad, also has TIM4_CH2 for PWM input capture)
 - VCC: 5V from FC
 - GND: GND from FC
-- Note: For simple on/off detection, threshold will be at ~1.5ms (50% of 1-2ms range)
+- Note: Supports both serial protocols (SBUS/CRSF) and PWM input capture
 
-**ADXL373 Accelerometer Wiring**:
-- CS:   PB12 (wire to AT7456E pin 8 pad)
-- SCLK: PB13 (wire to AT7456E pin 10 pad)
-- SDO:  PB14 (wire to AT7456E pin 11 pad, MISO from STM32 perspective)
-- SDI:  PB15 (wire to AT7456E pin 9 pad, MOSI from STM32 perspective)
+**ADXL373 Accelerometer Wiring** (bit-bang SPI):
+- CS:   PC12 (TX5 pad)
+- SCLK: PB3 (LED pad)
+- SDO:  PC2 (RSSI pad, MISO from STM32 perspective)
+- SDI:  PD2 (RX5 pad, MOSI from STM32 perspective)
 - VDD:  3.3V (from marked power pin on FC)
 - GND:  GND (from marked ground pin on FC)
 - INT1: Not connected (optional interrupt pin)
