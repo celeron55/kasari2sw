@@ -197,10 +197,10 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 
 | Signal | Pin | Pad Label | Direction |
 |--------|-----|-----------|-----------|
-| CS | PC12 | TX5 | Output |
+| CS | PD2 | RX5 | Output |
 | SCK | PB3 | LED | Output |
 | MISO | PC2 | RSSI | Input (from ADXL373 SDO) |
-| MOSI | PD2 | RX5 | Output (to ADXL373 SDI) |
+| MOSI | PC12 | TX5/F.Port | Output (to ADXL373 SDI) |
 
 **Note**: ADXL373 VDD (3.3V) and GND are connected to marked power pins on the FC board.
 
@@ -254,7 +254,7 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 - Barometer: None
 
 **External Hardware**:
-- Accelerometer: ADXL373 (bit-bang SPI on PC12/PB3/PC2/PD2)
+- Accelerometer: ADXL373 (bit-bang SPI on PD2/PB3/PC2/PC12)
 - LIDAR: Benewake TFA300 (UART2 RX=PA3)
 - RC Receiver: 1 channel on UART1 RX=PB7 (TIM4_CH2 for input capture)
 - Motors: 2x ESCs via DShot (PC8, PC9)
@@ -276,10 +276,10 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 - Note: Supports both serial protocols (SBUS/CRSF) and PWM input capture
 
 **ADXL373 Accelerometer Wiring** (bit-bang SPI):
-- CS:   PC12 (TX5 pad)
+- CS:   PD2 (RX5 pad)
 - SCLK: PB3 (LED pad)
 - SDO:  PC2 (RSSI pad, MISO from STM32 perspective)
-- SDI:  PD2 (RX5 pad, MOSI from STM32 perspective)
+- SDI:  PC12 (TX5/F.Port pad, MOSI from STM32 perspective)
 - VDD:  3.3V (from marked power pin on FC)
 - GND:  GND (from marked ground pin on FC)
 - INT1: Not connected (optional interrupt pin)

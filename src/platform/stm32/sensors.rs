@@ -122,10 +122,10 @@ pub async fn lidar_publisher(
 // ============================================================================
 //
 // Pin assignments (uses available pads on Mamba F722APP):
-// - CS:   PC12 (TX5 pad)
+// - CS:   PD2  (RX5 pad)
 // - SCK:  PB3  (LED pad)
 // - MISO: PC2  (RSSI pad, ADXL373 SDO)
-// - MOSI: PD2  (RX5 pad, ADXL373 SDI)
+// - MOSI: PC12 (TX5/F.Port pad, ADXL373 SDI)
 //
 // ADXL373 uses SPI mode 0 (CPOL=0, CPHA=0):
 // - Clock idle low
