@@ -3,7 +3,6 @@ use embassy_stm32::gpio::{Output, Input};
 use embassy_sync::pubsub::Publisher;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::Timer;
-use embedded_io_async::Read;
 use log::info;
 
 use kasarisw::shared::kasari::InputEvent;
@@ -43,6 +42,7 @@ pub fn parse_packet(packet: &[u8]) -> Option<ParsedPacket> {
 }
 
 /// Compute TFA300 checksum (simple sum of bytes, lower 8 bits)
+#[allow(dead_code)]
 pub fn compute_checksum(data: &[u8]) -> u8 {
     (data.iter().map(|&b| b as u16).sum::<u16>() & 0xFF) as u8
 }

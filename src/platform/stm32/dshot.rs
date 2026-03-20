@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+#![allow(non_upper_case_globals)]
+#![allow(unused_imports)]
+
 use embassy_stm32::peripherals;
 use log::info;
 
@@ -180,7 +184,7 @@ pub fn throttle_to_dshot_frame(throttle: u16, telemetry_req: bool) -> u16 {
     // Bits 3-0: checksum (4 bits)
 
     // Step 1: Create 12-bit packet with throttle and telemetry bit
-    let mut packet = (throttle << 1) | if telemetry_req { 1 } else { 0 };
+    let packet = (throttle << 1) | if telemetry_req { 1 } else { 0 };
 
     // Step 2: Compute checksum by XORing nibbles
     let mut csum = 0u16;

@@ -8,7 +8,7 @@
 use core::cell::RefCell;
 use core::fmt::Write;
 use cortex_m::interrupt::Mutex;
-use kasarisw::shared::kasari::{InputEvent, MotorControlPlan};
+use kasarisw::shared::kasari::InputEvent;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use static_cell::StaticCell;
 
@@ -188,7 +188,11 @@ fn format_event_human(event: &InputEvent, buf: &mut heapless::Vec<u8, 256>) {
             let _ = write!(s, "[\"Vbat\",{},{:.2}]", ts, voltage);
         }
         InputEvent::WifiControl(ts, mode, r, m, t) => {
-            let _ = write!(s, "[\"WifiControl\",{},{},{:.2},{:.2},{:.2}]", ts, mode, r, m, t);
+            let _ = write!(
+                s,
+                "[\"WifiControl\",{},{},{:.2},{:.2},{:.2}]",
+                ts, mode, r, m, t
+            );
         }
         InputEvent::Planner(ts, plan, cw, os, op, theta, rpm) => {
             let _ = write!(
@@ -212,7 +216,10 @@ fn format_event_human(event: &InputEvent, buf: &mut heapless::Vec<u8, 256>) {
             let _ = write!(
                 s,
                 "[\"Stats\",{},{},{},{}]",
-                ts, stats.step_min_duration_us, stats.step_max_duration_us, stats.step_avg_duration_us
+                ts,
+                stats.step_min_duration_us,
+                stats.step_max_duration_us,
+                stats.step_avg_duration_us
             );
         }
     }

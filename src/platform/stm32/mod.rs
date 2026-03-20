@@ -6,7 +6,7 @@ use embassy_stm32::{
     bind_interrupts,
     gpio::{Level, Output, Speed},
     peripherals,
-    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, BufferedInterruptHandler, Uart, BufferedUart, RingBufferedUartRx},
+    usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, BufferedInterruptHandler, Uart, BufferedUart},
     adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime},
     Config,
 };
@@ -62,7 +62,9 @@ static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
 // ESC target speed (bidirectional) to servo signal PWM duty cycle
 // This function is platform-independent
+#[allow(dead_code)]
 const PWM_HZ: f32 = 400.0;
+#[allow(dead_code)]
 fn target_speed_to_pwm_duty(speed_percent: f32, duty_range: u32) -> u32 {
     let center_pwm = 0.00149 * PWM_HZ;
     let pwm_amplitude = 0.000350 * PWM_HZ;
@@ -75,6 +77,7 @@ fn target_speed_to_pwm_duty(speed_percent: f32, duty_range: u32) -> u32 {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     // Initialize heap
+    #[allow(static_mut_refs)]
     unsafe {
         ALLOCATOR.init(&mut HEAP as *const u8 as usize, HEAP_SIZE);
     }
@@ -108,7 +111,7 @@ async fn main(spawner: Spawner) {
 
     // Enable overdrive mode AFTER init for 216 MHz (>180 MHz requires this)
     // Embassy might have configured clocks but not enabled overdrive
-    unsafe {
+    {
         use embassy_stm32::pac;
         use embassy_stm32::pac::pwr::vals::Vos;
         // Set voltage scale 1 for high performance (required for 216 MHz)
