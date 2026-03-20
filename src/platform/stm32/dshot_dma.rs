@@ -81,14 +81,15 @@ impl DShotDma {
             core::ptr::write_volatile(0x4002_3840 as *mut u32, rcc_apb1enr | (1 << 1));
 
             // Configure GPIO PC8/PC9 as AF2 (TIM3_CH3/CH4), high speed
+            // Mask 0xFFF0_FFFF preserves all bits except PC8/PC9 (bits 16-19)
             let moder = core::ptr::read_volatile(0x4002_0800 as *mut u32);
-            core::ptr::write_volatile(0x4002_0800 as *mut u32, (moder & 0xFFF0_0000) | 0x000A_0000);
+            core::ptr::write_volatile(0x4002_0800 as *mut u32, (moder & 0xFFF0_FFFF) | 0x000A_0000);
 
             let afrh = core::ptr::read_volatile(0x4002_0824 as *mut u32);
             core::ptr::write_volatile(0x4002_0824 as *mut u32, (afrh & 0xFFFF_FF00) | 0x22);
 
             let ospeedr = core::ptr::read_volatile(0x4002_0808 as *mut u32);
-            core::ptr::write_volatile(0x4002_0808 as *mut u32, (ospeedr & 0xFFF0_0000) | 0xA_0000);
+            core::ptr::write_volatile(0x4002_0808 as *mut u32, (ospeedr & 0xFFF0_FFFF) | 0x000A_0000);
 
             // Configure TIM3: prescaler, period, PWM mode, output enable
             core::ptr::write_volatile(TIM3_CR1 as *mut u32, 0);
