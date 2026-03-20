@@ -134,6 +134,8 @@ pub async fn lidar_publisher(
 
 // ADXL373 register addresses
 const ADXL373_REG_DEVID_AD: u8 = 0x00;   // Device ID (should read 0xAD)
+const ADXL373_REG_XDATA_H: u8 = 0x08;    // X-axis data high byte
+#[allow(dead_code)]
 const ADXL373_REG_YDATA_H: u8 = 0x0A;    // Y-axis data high byte
 const ADXL373_REG_POWER_CTL: u8 = 0x3F;  // Power control register
 
@@ -269,18 +271,18 @@ impl<'a> Adxl373BitBang<'a> {
         true
     }
 
-    /// Read Y-axis acceleration in G (only axis needed for RPM calculation)
-    pub fn read_y(&mut self) -> f32 {
-        // Read 2 bytes: YDATA_H, YDATA_L
+    /// Read X-axis acceleration in G (only axis needed for RPM calculation)
+    pub fn read_x(&mut self) -> f32 {
+        // Read 2 bytes: XDATA_H, XDATA_L
         let mut buf = [0u8; 2];
-        self.read_burst(ADXL373_REG_YDATA_H, &mut buf);
+        self.read_burst(ADXL373_REG_XDATA_H, &mut buf);
 
         // Parse 12-bit signed value (upper 12 bits of 16-bit register pair)
         // Data is MSB first, 12-bit left-justified
-        let y_raw = ((buf[0] as i16) << 8 | buf[1] as i16) >> 4;
+        let x_raw = ((buf[0] as i16) << 8 | buf[1] as i16) >> 4;
 
         // Convert to G (100 mg/LSB for ±200g range)
-        y_raw as f32 * ADXL373_G_PER_LSB
+        x_raw as f32 * ADXL373_G_PER_LSB
     }
 }
 
@@ -307,18 +309,18 @@ pub async fn accel_publisher(
     let mut sample_count = 0u32;
 
     loop {
-        let y_g = adxl.read_y();
+        let x_g = adxl.read_x();
 
-        // Publish event (only Y axis used for centripetal acceleration / RPM calculation)
+        // Publish event (only X axis used for centripetal acceleration / RPM calculation)
         // Z axis unused, filled with 0
         let ts = embassy_time::Instant::now().as_micros() as u64;
-        let event = InputEvent::Accelerometer(ts, -y_g, 0.0);
+        let event = InputEvent::Accelerometer(ts, x_g, 0.0);
         publisher.publish_immediate(event);
 
         // Log stats periodically
         sample_count += 1;
         if sample_count % 1000 == 0 {
-            info!("ADXL373: {} samples, Y={:.1} G", sample_count, y_g);
+            info!("ADXL373: {} samples, X={:.1} G", sample_count, x_g);
         }
 
         // 100 Hz sampling
