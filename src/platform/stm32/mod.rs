@@ -19,6 +19,7 @@ mod sensors;
 mod logging;
 mod panic_uart;
 mod usb_cdc;
+mod console;
 pub mod dshot;
 pub mod dshot_dma;
 // mod debug_uart;  // Commented out - not used
@@ -119,7 +120,13 @@ async fn main(spawner: Spawner) {
     }
 
     // ============================================================================
-    // UART4 LOGGING - WiFi adapter port (PA0=TX, PA1=RX, 115200 baud)
+    // CONSOLE SYSTEM - Initialize before logger
+    // ============================================================================
+
+    let (uart_console, usb_console) = console::init_consoles();
+
+    // ============================================================================
+    // UART4 CONSOLE - WiFi adapter port (PA0=TX, PA1=RX, 115200 baud)
     // ============================================================================
 
     let mut uart4_config = UartConfig::default();
@@ -129,26 +136,27 @@ async fn main(spawner: Spawner) {
     // Since we need both DShot channels, UART4 must use blocking/interrupt mode
     let uart4 = Uart::new_blocking(
         p.UART4,
-        p.PA1,  // RX (interrupt mode)
-        p.PA0,  // TX (interrupt mode)
+        p.PA1,  // RX (polled via PAC in console task)
+        p.PA0,  // TX (blocking write)
         uart4_config,
     ).unwrap();
+    // Split UART4 - we only use TX, RX is polled via PAC registers
+    let (uart4_tx, _uart4_rx) = uart4.split();
 
-    // Initialize logger (buffered to ring buffer)
+    // Initialize logger (writes to console buffers)
     logging::init_logger();
     info!("Kasari2sw STM32F722 starting...");
     info!("STM32F722 initialized at 216 MHz (8 MHz HSE, overdrive enabled)");
 
-    // Spawn log drain task to send buffered logs to UART4
-    spawner.spawn(logging::log_drain_task(uart4)).unwrap();
-    info!("Logger initialized - logs streaming to UART4 (PA0 TX, PA1 RX, 115200 baud, blocking mode)");
+    // Spawn UART console task (TX drain + RX command polling)
+    spawner.spawn(logging::uart_console_task(uart4_tx, uart_console)).unwrap();
+    info!("UART4 console initialized (PA0 TX, PA1 RX, 115200 baud)");
 
     // ============================================================================
-    // USB CDC LOGGING - Direct USB logging
+    // USB CDC CONSOLE - Direct USB serial
     // ============================================================================
 
     use embassy_stm32::usb::Driver;
-    use static_cell::StaticCell;
 
     static USB_EP_OUT_BUFFER: StaticCell<[u8; 1024]> = StaticCell::new();
 
@@ -164,9 +172,9 @@ async fn main(spawner: Spawner) {
         usb_config,
     );
 
-    // Spawn USB CDC log drain task
-    spawner.spawn(usb_cdc::usb_cdc_log_drain_task(usb_driver)).unwrap();
-    info!("USB CDC initialized - logs also streaming to USB (PA12 D+, PA11 D-)");
+    // Spawn USB CDC console task (TX drain + RX commands)
+    spawner.spawn(usb_cdc::usb_cdc_console_task(usb_driver, usb_console)).unwrap();
+    info!("USB CDC console initialized (PA12 D+, PA11 D-)");
 
     // ============================================================================
     // EVENT CHANNEL - Pub/Sub for sensor events
@@ -481,6 +489,7 @@ async fn main_logic_task(
     mut publisher: embassy_sync::pubsub::Publisher<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
 ) {
     use embassy_time::{Duration, Instant};
+    use console::{get_uart_console, get_usb_console};
 
     info!("MainLogic task running at ~50 Hz");
 
@@ -491,11 +500,16 @@ async fn main_logic_task(
         let loop_start = Instant::now();
         let ts = loop_start.as_micros() as u64;
 
+        // Collect events for console output (outside critical section)
+        let mut events_for_console: heapless::Vec<InputEvent, 32> = heapless::Vec::new();
+
         critical_section::with(|cs| {
             let mut logic = main_logic.borrow(cs).borrow_mut();
 
             // Drain all pending events (non-blocking)
             while let Some(event) = subscriber.try_next_message_pure() {
+                // Store for console output
+                let _ = events_for_console.push(event.clone());
                 logic.feed_event(event);
             }
 
@@ -512,6 +526,15 @@ async fn main_logic_task(
                 modulator.mcp = None;
             }
         });
+
+        // Feed events to consoles (outside critical section for performance)
+        // Flow control is handled inside write_event()
+        for event in &events_for_console {
+            cortex_m::interrupt::free(|cs| {
+                get_uart_console().borrow(cs).borrow_mut().write_event(event);
+                get_usb_console().borrow(cs).borrow_mut().write_event(event);
+            });
+        }
 
         // Always yield at least 5ms to other tasks
         Timer::after_millis(MIN_SLEEP_MS).await;

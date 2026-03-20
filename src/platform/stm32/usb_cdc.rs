@@ -5,9 +5,14 @@ use embassy_usb::driver::EndpointError;
 use embassy_usb::{Builder, Config};
 use ringbuffer::RingBuffer;
 
-// Task that drains the log ring buffer to USB CDC
+use crate::console::ConsoleMutex;
+
+/// USB CDC console task - handles both TX drain and RX command processing
 #[embassy_executor::task]
-pub async fn usb_cdc_log_drain_task(driver: Driver<'static, USB_OTG_FS>) -> ! {
+pub async fn usb_cdc_console_task(
+    driver: Driver<'static, USB_OTG_FS>,
+    console: &'static ConsoleMutex,
+) -> ! {
     use embassy_time::Timer;
 
     // Create embassy-usb Config
@@ -50,21 +55,53 @@ pub async fn usb_cdc_log_drain_task(driver: Driver<'static, USB_OTG_FS>) -> ! {
     // Run the USB device in the background
     let usb_fut = usb.run();
 
-    // Create log drain future
-    let log_drain_fut = async {
+    // Create console I/O future
+    let console_fut = async {
         loop {
             // Wait for USB to be connected and class to be ready
             class.wait_connection().await;
 
-            // Now drain logs to USB CDC
+            // Connection established - handle I/O
             loop {
-                // Collect pending log data
+                // 1. Try to read incoming data (commands) - non-blocking with short timeout
+                let mut rx_buf = [0u8; 64];
+
+                // Use select to check for RX data without blocking the TX drain
+                use embassy_futures::select::{select, Either};
+                use embassy_time::Duration;
+
+                let read_fut = class.read_packet(&mut rx_buf);
+                let timeout_fut = Timer::after(Duration::from_millis(1));
+
+                match select(read_fut, timeout_fut).await {
+                    Either::First(Ok(n)) if n > 0 => {
+                        // Process received bytes
+                        cortex_m::interrupt::free(|cs| {
+                            let mut state = console.borrow(cs).borrow_mut();
+                            for &byte in &rx_buf[..n] {
+                                if let Some(cmd) = state.process_rx_byte(byte) {
+                                    let response = state.execute_command(&cmd);
+                                    state.write_bytes(response.as_bytes());
+                                }
+                            }
+                        });
+                    }
+                    Either::First(Err(EndpointError::Disabled)) => {
+                        // USB disconnected
+                        break;
+                    }
+                    _ => {
+                        // Timeout or other error - continue with TX drain
+                    }
+                }
+
+                // 2. Drain output ring buffer to TX
                 let mut pending: heapless::Vec<u8, 256> = heapless::Vec::new();
 
                 cortex_m::interrupt::free(|cs| {
-                    let mut ring = crate::logging::get_usb_ring_buffer().borrow(cs).borrow_mut();
+                    let mut state = console.borrow(cs).borrow_mut();
                     while pending.len() < pending.capacity() {
-                        if let Some(byte) = ring.dequeue() {
+                        if let Some(byte) = state.output_ring.dequeue() {
                             let _ = pending.push(byte);
                         } else {
                             break;
@@ -72,16 +109,15 @@ pub async fn usb_cdc_log_drain_task(driver: Driver<'static, USB_OTG_FS>) -> ! {
                     }
                 });
 
-                // Send to USB CDC if we have data
                 if !pending.is_empty() {
                     match class.write_packet(&pending).await {
                         Ok(_) => {}
                         Err(EndpointError::Disabled) => {
-                            // USB disconnected, break inner loop and wait for reconnection
+                            // USB disconnected
                             break;
                         }
                         Err(_) => {
-                            // Other error, just continue
+                            // Other error, continue
                         }
                     }
                 }
@@ -91,8 +127,8 @@ pub async fn usb_cdc_log_drain_task(driver: Driver<'static, USB_OTG_FS>) -> ! {
         }
     };
 
-    // Run both USB device and log drain concurrently
-    embassy_futures::join::join(usb_fut, log_drain_fut).await;
+    // Run both USB device and console I/O concurrently
+    embassy_futures::join::join(usb_fut, console_fut).await;
 
     // This should never return
     loop {
