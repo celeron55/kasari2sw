@@ -1,7 +1,7 @@
-default_job = "esp"
+default_job = "stm"
 
-[jobs.esp]
-command = ["cargo", "check", "--target", "xtensa-esp32-none-elf", "--features", "esp"]
+[jobs.stm]
+command = ["cargo", "check", "--target", "thumbv7em-none-eabihf", "--features", "stm32"]
 need_stdout = false
 env.CARGO_TERM_COLOR = "always"
 
