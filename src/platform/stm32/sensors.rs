@@ -260,10 +260,10 @@ impl<'a> Adxl373BitBang<'a> {
             return false;
         }
 
-        // Configure power control: measurement mode
-        // POWER_CTL (0x3F): bits 1:0 = mode (0b10 = measurement mode)
-        // Full bandwidth mode, no high-pass filter
-        self.write_reg(ADXL373_REG_POWER_CTL, 0b00000010);
+        // Configure power control: full bandwidth measurement mode
+        // POWER_CTL (0x3F): bits 1:0 = mode (0b11 = full bandwidth measurement mode)
+        // No high-pass filter, no low-pass filter
+        self.write_reg(ADXL373_REG_POWER_CTL, 0b00000011);
 
         // Small delay for mode change
         cortex_m::asm::delay(10_000);
