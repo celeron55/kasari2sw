@@ -388,10 +388,10 @@ async fn main_logic_task(
     const LOOP_INTERVAL_MS: u64 = 20; // Target 50 Hz
     const MIN_SLEEP_MS: u64 = 5;      // Minimum yield time for other tasks
 
-    // Battery voltage divider: 183k/29k (ratio = 29/(183+29) = 0.1368)
+    // Battery voltage divider: measured ratio = 0.0908 (1.16V at ADC for 12.78V battery)
     // ADC: 12-bit (4096), Vref=3.3V
-    // Voltage = ADC_raw * 3.3 / 4096 / 0.1368
-    const VBAT_SCALE: f32 = 3.3 / 4096.0 / 0.1368;
+    // Voltage = ADC_raw * 3.3 / 4096 / 0.0908
+    const VBAT_SCALE: f32 = 3.3 / 4096.0 / 0.0908;
 
     let mut loop_counter: u32 = 0;
 
