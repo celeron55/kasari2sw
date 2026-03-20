@@ -111,12 +111,16 @@ cargo run-stm        # Flash via probe-rs (SWD)
 probe-rs attach --chip STM32F722RETx  # View defmt logs over RTT
 ```
 
-**Current Status**: LED blink test working at 216 MHz (8 MHz HSE + overdrive mode). GYRO (blue) and MCU (orange) LEDs alternate at 1 Hz. Ready to implement:
-- Motor DShot outputs (PC8, PC9)
-- LIDAR UART RX (TFA300 on UART2 RX=PA3)
-- WiFi adapter UART (UART4 TX=PA0, RX=PA1)
-- Accelerometer SPI (ADXL373 on SPI2: CS=PB12, SCK=PB13, MISO=PB14, MOSI=PB15)
-- RC receiver input capture (UART1 RX=PB7 with TIM4_CH2)
+**Current Status**: Console system with output mode switching (log/event/binevent). Implemented:
+- DShot: DMA-based output on PC8/PC9 (TIM3_CH3/CH4)
+- LIDAR: UART2 at 921600 baud (PA3 RX), DMA ring buffer
+- WiFi: UART4 BufferedUart (PA0=TX, PA1=RX), interrupt-driven RX
+- Console: Output mode switching on USB CDC and UART4
+- Accelerometer: ADXL373 bit-bang SPI
+- Shared logic: MainLogic + MotorModulator integrated
+
+Not yet implemented:
+- RC receiver (ExpressLRS CRSF on UART1)
 - Battery voltage ADC (PC1)
 
 ### Embedded Firmware (RP2350)
