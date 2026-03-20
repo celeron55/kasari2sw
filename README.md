@@ -249,7 +249,7 @@ elf2uf2-rs deploy --family rp2350-arm-s \
 - LED1: PC14
 - BEEPER: PB2 (inverted)
 - LED_STRIP: PB3
-- PINIO1: PB0
+- PINIO1: PB0 (has HW pull-up, betaflight was configured to pull low when armed)
 
 **Onboard Hardware**:
 - Gyroscope: MPU6000 (SPI1) - unused
