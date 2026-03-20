@@ -208,6 +208,22 @@ async fn main(spawner: Spawner) {
     info!("LIDAR initialized - UART2 at 921600 baud (PA3 RX, DMA1_CH5)");
 
     // ============================================================================
+    // ADXL373 ACCELEROMETER - Bit-bang SPI (100 Hz sampling)
+    // ============================================================================
+    // Pins: CS=PC12 (TX5), SCK=PB3 (LED), MISO=PC2 (RSSI), MOSI=PD2 (RX5)
+
+    use embassy_stm32::gpio::{Input, Pull};
+
+    let accel_cs = Output::new(p.PC12, Level::High, Speed::VeryHigh);
+    let accel_sck = Output::new(p.PB3, Level::Low, Speed::VeryHigh);
+    let accel_mosi = Output::new(p.PD2, Level::Low, Speed::VeryHigh);
+    let accel_miso = Input::new(p.PC2, Pull::None);
+
+    let accel_publisher = event_channel.publisher().unwrap();
+    spawner.spawn(sensors::accel_publisher(accel_cs, accel_sck, accel_mosi, accel_miso, accel_publisher)).unwrap();
+    info!("ADXL373 initialized - bit-bang SPI (CS=PC12, SCK=PB3, MISO=PC2, MOSI=PD2)");
+
+    // ============================================================================
     // MAIN LOGIC TASK - Event processing and motor control planning
     // ============================================================================
 
