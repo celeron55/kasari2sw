@@ -7,6 +7,7 @@ use embassy_stm32::{
     gpio::{Level, Output, Speed},
     peripherals,
     usart::{Config as UartConfig, InterruptHandler as UsartInterruptHandler, BufferedInterruptHandler, Uart, BufferedUart, RingBufferedUartRx},
+    adc::{Adc, AdcChannel, AnyAdcChannel, SampleTime},
     Config,
 };
 use static_cell::StaticCell;
@@ -235,6 +236,14 @@ async fn main(spawner: Spawner) {
     info!("ADXL373 initialized - bit-bang SPI (CS=PD2, SCK=PB3, MISO=PC2, MOSI=PC12)");
 
     // ============================================================================
+    // BATTERY VOLTAGE ADC - PC1 (ADC channel 11)
+    // ============================================================================
+
+    let adc = Adc::new(p.ADC1);
+    let vbat_channel = p.PC1.degrade_adc();
+    info!("ADC initialized for battery voltage (PC1)");
+
+    // ============================================================================
     // MAIN LOGIC TASK - Event processing and motor control planning
     // ============================================================================
 
@@ -251,7 +260,7 @@ async fn main(spawner: Spawner) {
     // Get subscriber and publisher for main logic task
     let main_logic_subscriber = event_channel.subscriber().unwrap();
     let main_logic_publisher = event_channel.publisher().unwrap();
-    spawner.spawn(main_logic_task(main_logic, motor_modulator, main_logic_subscriber, main_logic_publisher)).unwrap();
+    spawner.spawn(main_logic_task(main_logic, motor_modulator, main_logic_subscriber, main_logic_publisher, adc, vbat_channel)).unwrap();
     info!("MainLogic task started");
 
     // ============================================================================
@@ -343,10 +352,6 @@ async fn main(spawner: Spawner) {
     //     embassy_stm32::time::Hertz(1_000_000),  // 1 MHz for microsecond resolution
     // );
 
-    // TODO: Battery Voltage ADC (likely ADC1)
-    // let mut vbat_adc = embassy_stm32::adc::Adc::new(p.ADC1);
-    // let vbat_pin = p.PC0;  // ADC input (TBD)
-
     // TODO: Status LED
     // let mut status_led = Output::new(p.PB2, Level::Low, Speed::Low);  // LED pin (TBD)
 
@@ -372,9 +377,6 @@ async fn main(spawner: Spawner) {
 
     // TODO: Spawn RC receiver task
     // spawner.spawn(sensors::rc_receiver_task(rc_capture, event_channel)).unwrap();
-
-    // TODO: Spawn battery voltage monitoring task
-    // spawner.spawn(battery_monitor_task(vbat_adc, vbat_pin, event_channel)).unwrap();
 
     // TODO: Spawn WiFi adapter initialization task
     // spawner.spawn(wifi_init_task(wifi_uart)).unwrap();
@@ -490,6 +492,8 @@ async fn main_logic_task(
     motor_modulator: &'static critical_section::Mutex<core::cell::RefCell<MotorModulator>>,
     mut subscriber: embassy_sync::pubsub::Subscriber<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
     mut publisher: embassy_sync::pubsub::Publisher<'static, embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, InputEvent, 64, 3, 6>,
+    mut adc: Adc<'static, peripherals::ADC1>,
+    mut vbat_channel: AnyAdcChannel<'static, peripherals::ADC1>,
 ) {
     use embassy_time::{Duration, Instant};
     use console::{get_uart_console, get_usb_console};
@@ -499,9 +503,27 @@ async fn main_logic_task(
     const LOOP_INTERVAL_MS: u64 = 20; // Target 50 Hz
     const MIN_SLEEP_MS: u64 = 5;      // Minimum yield time for other tasks
 
+    // Battery voltage divider: 183k/29k (ratio = 29/(183+29) = 0.1368)
+    // ADC: 12-bit (4096), Vref=3.3V
+    // Voltage = ADC_raw * 3.3 / 4096 / 0.1368
+    const VBAT_SCALE: f32 = 3.3 / 4096.0 / 0.1368;
+
+    let mut loop_counter: u32 = 0;
+
     loop {
         let loop_start = Instant::now();
         let ts = loop_start.as_micros() as u64;
+
+        // Read battery voltage every 10 loops (~5 Hz)
+        if loop_counter % 10 == 0 {
+            let vbat_raw = adc.blocking_read(&mut vbat_channel, SampleTime::CYCLES480);
+            let vbat = vbat_raw as f32 * VBAT_SCALE;
+            if loop_counter % 500 == 0 {
+                info!("ADC raw: {}, Vbat: {:.2}V", vbat_raw, vbat);
+            }
+            publisher.publish_immediate(InputEvent::Vbat(ts, vbat));
+        }
+        loop_counter = loop_counter.wrapping_add(1);
 
         // Collect events for console output (outside critical section)
         let mut events_for_console: heapless::Vec<InputEvent, 32> = heapless::Vec::new();
