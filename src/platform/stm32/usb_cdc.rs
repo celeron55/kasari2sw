@@ -150,21 +150,19 @@ pub async fn usb_cdc_console_task(
                                     msp_mode = true;  // Disable console output once MSP detected
                                     match cmd {
                                         MSP_API_VERSION => {
-                                            // MSP_PROTOCOL_VERSION=0, API_VERSION_MAJOR=1, API_VERSION_MINOR=48
-                                            let response = build_msp_response(cmd, &[0, 1, 48]);
-                                            info!("MSP TX cmd 1 ({} bytes)", response.len());
-                                            let write_result = class.write_packet(&response).await;
-                                            if write_result.is_err() {
-                                                info!("  write error: {:?}", write_result);
+                                            // MSP_PROTOCOL_VERSION=0, API_VERSION_MAJOR=1, API_VERSION_MINOR=44
+                                            let response = build_msp_response(cmd, &[0, 1, 44]);
+                                            info!("MSP TX cmd 1: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
                                             }
                                         }
                                         MSP_FC_VARIANT => {
                                             // FLIGHT_CONTROLLER_IDENTIFIER_LENGTH = 4
                                             let response = build_msp_response(cmd, b"BTFL");
-                                            info!("MSP TX cmd 2 ({} bytes)", response.len());
-                                            let write_result = class.write_packet(&response).await;
-                                            if write_result.is_err() {
-                                                info!("  write error: {:?}", write_result);
+                                            info!("MSP TX cmd 2: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
                                             }
                                         }
                                         MSP_FC_VERSION => {
@@ -174,42 +172,41 @@ pub async fn usb_cdc_console_task(
                                                 3,   // FC_VERSION_MINOR
                                                 2,   // FC_VERSION_PATCH_LEVEL
                                             ]);
-                                            info!("MSP TX cmd 3 ({} bytes)", response.len());
-                                            let write_result = class.write_packet(&response).await;
-                                            if write_result.is_err() {
-                                                info!("  write error: {:?}", write_result);
+                                            info!("MSP TX cmd 3: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
                                             }
                                         }
                                         MSP_BOARD_INFO => {
-                                            // Betaflight 4.3.2 format (API 1.44) - 64 byte payload
                                             let target_name = b"STM32F722RE";
                                             let payload: heapless::Vec<u8, 64> = heapless::Vec::from_slice(&[
-                                                b'S', b'7', b'2', b'2',  // boardIdentifier (4)
-                                                0, 0,                    // hardwareRevision (2)
-                                                0,                       // type: 0=FC (1)
-                                                1,                       // targetCapabilities: VCP=1 (1)
-                                                target_name.len() as u8,  // targetName length
+                                                b'S', b'7', b'2', b'2',
+                                                0, 0,
+                                                0,
+                                                1,
+                                                target_name.len() as u8,
                                                 b'S', b'T', b'M', b'3', b'2', b'F', b'7', b'2', b'2', b'R', b'E',
-                                                0,                       // boardName length (empty)
-                                                0,                       // manufacturerId length (empty)
-                                                // signature (32 bytes, all zeros)
+                                                0,
+                                                0,
                                                 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
                                                 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-                                                6,                       // mcuTypeId (6=MCU_TYPE_F722)
-                                                1,                       // configurationState (1=CONFIGURED)
-                                                0xE8, 0x03,              // sampleRateHz (1000)
-                                                0, 0, 0, 0,              // configurationProblems (none)
-                                                0,                       // spiDeviceCount
-                                                0,                       // i2cDeviceCount
+                                                6,
+                                                1,
+                                                0xE8, 0x03,
+                                                0, 0, 0, 0,
+                                                0,
+                                                0,
                                             ]).unwrap();
                                             let response = build_msp_response(cmd, &payload);
                                             info!("MSP TX cmd 4 ({} bytes)", response.len());
-                                            // Send in 64-byte chunks (full-speed USB max)
                                             const MAX_PACKET: usize = 64;
                                             let mut offset = 0;
                                             while offset < response.len() {
                                                 let end = (offset + MAX_PACKET).min(response.len());
-                                                let _ = class.write_packet(&response[offset..end]).await;
+                                                if class.write_packet(&response[offset..end]).await.is_err() {
+                                                    info!("  ERROR: write failed");
+                                                    break;
+                                                }
                                                 offset = end;
                                                 if offset < response.len() {
                                                     embassy_time::Timer::after_micros(100).await;
@@ -218,9 +215,6 @@ pub async fn usb_cdc_console_task(
                                         }
                                         MSP_BUILD_INFO => {
                                             // Betaflight format: date(11) + time(8) + gitrev(7) = 26 bytes
-                                            // Build date: "Mar 21 2026" (11 chars, padded with spaces)
-                                            // Build time: "12:00:00" (8 chars)
-                                            // Git rev: "abcdefg" (7 chars)
                                             let date = b"Mar 21 2026";
                                             let time = b"12:00:00";
                                             let git_rev = b"abcdefg";
@@ -229,114 +223,128 @@ pub async fn usb_cdc_console_task(
                                             payload[11..19].copy_from_slice(time);
                                             payload[19..26].copy_from_slice(git_rev);
                                             let response = build_msp_response(cmd, &payload);
-                                            info!("MSP TX cmd 5");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 5: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_FEATURE_CONFIG => {
-                                            // Response: feature mask (4 bytes)
                                             let response = build_msp_response(cmd, &[0, 0, 0, 0]);
-                                            info!("MSP TX cmd 36");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 36: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_STATUS => {
-                                            // Betaflight 4.3.2 MSP_STATUS format
-                                            // cycleTime(2) + i2cError(2) + sensors(2) + flightModeFlags(4) + pidProfile(1) + avgLoad(2) + gyroCycle(2) + flagByteCount(1) + armingDisableCount(1) + armingDisableFlags(4) + rebootRequired(1)
                                             let response = build_msp_response(cmd, &[
-                                                0xE8, 0x03,  // cycleTime (1000us)
+                                                0xE8, 0x03,  // cycleTime
                                                 0, 0,        // i2cErrorCounter
                                                 0x20, 0,     // sensors (gyro = bit 5)
-                                                0, 0, 0, 0,  // flightModeFlags (4 bytes)
+                                                0, 0, 0, 0,  // flightModeFlags
                                                 0,           // currentPidProfileIndex
                                                 0, 0,        // averageSystemLoadPercent
-                                                0, 0,        // gyro cycle time (MSP_STATUS)
+                                                0, 0,        // gyro cycle time
                                                 0,           // flightModeFlags extension byteCount
-                                                26,          // ARMING_DISABLE_FLAGS_COUNT (26 in 4.3.2)
-                                                0, 0, 0, 0,  // armingDisableFlags = 0 (all clear)
+                                                26,          // ARMING_DISABLE_FLAGS_COUNT
+                                                0, 0, 0, 0,  // armingDisableFlags
                                                 0,           // rebootRequired
                                             ]);
-                                            info!("MSP TX cmd 90");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 90: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_MOTOR_CONFIG => {
-                                            // Betaflight MSP_MOTOR_CONFIG format
                                             let response = build_msp_response(cmd, &[
-                                                0, 0,        // minThrottle = 0 (was removed after API 4.5)
+                                                0, 0,        // minThrottle
                                                 0xD0, 0x07,  // maxThrottle = 2000
                                                 0xE8, 0x03,  // minCommand = 1000
-                                                4,           // getMotorCount() = 4
+                                                4,           // motorCount = 4
                                                 14,          // motorPoleCount = 14
-                                                0,           // useDshotTelemetry = false
-                                                0,           // escSensor feature = false
+                                                0,           // useDshotTelemetry
+                                                0,           // escSensor
                                             ]);
-                                            info!("MSP TX cmd 119");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 119: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_STATUS_EX => {
-                                            // Betaflight 4.3.2 MSP_STATUS_EX format
-                                            // cycleTime(2) + i2cError(2) + sensors(2) + flightModeFlags(4) + pidProfile(1) + avgLoad(2) + pidCount(1) + rateProfile(1) + flagByteCount(1) + armingDisableCount(1) + armingDisableFlags(4) + rebootRequired(1)
                                             let response = build_msp_response(cmd, &[
-                                                0xE8, 0x03,  // cycleTime (1000us)
+                                                0xE8, 0x03,  // cycleTime
                                                 0, 0,        // i2cErrorCounter
                                                 0x20, 0,     // sensors (gyro = bit 5)
-                                                0, 0, 0, 0,  // flightModeFlags (4 bytes)
+                                                0, 0, 0, 0,  // flightModeFlags
                                                 0,           // currentPidProfileIndex
                                                 0, 0,        // averageSystemLoadPercent
                                                 3,           // PID_PROFILE_COUNT
                                                 0,           // currentControlRateProfileIndex
                                                 0,           // flightModeFlags extension byteCount
-                                                26,          // ARMING_DISABLE_FLAGS_COUNT (26 in 4.3.2)
-                                                0, 0, 0, 0,  // armingDisableFlags = 0 (all clear)
+                                                26,          // ARMING_DISABLE_FLAGS_COUNT
+                                                0, 0, 0, 0,  // armingDisableFlags
                                                 0,           // rebootRequired
                                             ]);
-                                            info!("MSP TX cmd 101");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 101: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_MOTOR => {
-                                            // 8 motors * u16 = 16 bytes, all stopped (value 0)
                                             let response = build_msp_response(cmd, &[
-                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 1-4 stopped
-                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 5-8 stopped
+                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 1-4
+                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 5-8
                                             ]);
-                                            info!("MSP TX cmd 124");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 124: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_BOXIDS => {
-                                            // BOXARM=0, BOXPREARM=36 (minimal config)
+                                            // BOXARM=0, BOXPREARM=36
                                             let response = build_msp_response(cmd, &[0, 36]);
-                                            info!("MSP TX cmd 104");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 104: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_ADVANCED_CONFIG => {
-                                            // Betaflight MSP_ADVANCED_CONFIG format
                                             let response = build_msp_response(cmd, &[
-                                                1,           // gyro_sync_denom (deprecated, always 1)
+                                                1,           // gyro_sync_denom
                                                 1,           // pid_process_denom
                                                 0,           // useContinuousUpdate
-                                                5,           // motorProtocol (5 = DSHOT300)
-                                                0xE8, 0x03,  // motorPwmRate = 1000
-                                                0, 0,        // motorIdle = 0
-                                                0,           // gyro_use_32kHz (deprecated)
+                                                5,           // motorProtocol (DSHOT300)
+                                                0xE8, 0x03,  // motorPwmRate
+                                                0, 0,        // motorIdle
+                                                0,           // gyro_use_32kHz
                                                 0,           // motorInversion
-                                                0,           // gyro_to_use (deprecated)
+                                                0,           // gyro_to_use
                                                 0,           // gyro_high_fsr
                                                 48,          // gyroMovementCalibrationThreshold
-                                                0x78, 0x00,  // gyroCalibrationDuration = 120
+                                                0x78, 0x00,  // gyroCalibrationDuration
                                                 0, 0,        // gyro_offset_yaw
-                                                2,           // checkOverflow (GYRO_OVERFLOW_CHECK_ALL)
+                                                2,           // checkOverflow
                                                 0,           // debug_mode
                                                 4,           // DEBUG_COUNT
                                             ]);
-                                            info!("MSP TX cmd 131");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 131: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_REBOOT => {
-                                            // Return the reboot mode that was requested
-                                            let response = build_msp_response(cmd, &[0]);  // 0 = MSP_REBOOT_FIRMWARE
-                                            info!("MSP TX cmd 68");
-                                            let _ = class.write_packet(&response).await;
+                                            let response = build_msp_response(cmd, &[0]);
+                                            info!("MSP TX cmd 68: {:02X?}", &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
                                         }
                                         MSP_PASSTHROUGH_ESC_4WAY => {
-                                            info!("BLHeli passthrough mode entered");
+                                            info!("MSP TX cmd 255 - entering passthrough");
+                                            let response = build_msp_response(cmd, &[4]);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
+                                            }
+                                            Timer::after(Duration::from_millis(10)).await;
 
                                             // Disable DShot/motor control timers
                                             unsafe {
@@ -348,11 +356,6 @@ pub async fn usb_cdc_console_task(
 
                                             // Configure motor pins as GPIO input with pull-up
                                             init_motor_pins_gpio();
-
-                                            // Send MSP response with ESC count
-                                            let response = build_msp_response(cmd, &[4]);
-                                            let _ = class.write_packet(&response).await;
-                                            Timer::after(Duration::from_millis(10)).await;
 
                                             passthrough_mode = true;
                                         }
