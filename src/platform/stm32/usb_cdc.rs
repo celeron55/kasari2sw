@@ -179,39 +179,15 @@ pub async fn usb_cdc_console_task(
                                             }
                                         }
                                         MSP_BOARD_INFO => {
-                                            let target_name = b"STM32F722RE";
-                                            let payload: heapless::Vec<u8, 64> = heapless::Vec::from_slice(&[
-                                                b'S', b'7', b'2', b'2',
-                                                0, 0,
-                                                0,
-                                                1,
-                                                target_name.len() as u8,
-                                                b'S', b'T', b'M', b'3', b'2', b'F', b'7', b'2', b'2', b'R', b'E',
-                                                0,
-                                                0,
-                                                0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-                                                6,
-                                                1,
-                                                0xE8, 0x03,
-                                                0, 0, 0, 0,
-                                                0,
-                                                0,
-                                            ]).unwrap();
-                                            let response = build_msp_response(cmd, &payload);
-                                            info!("MSP TX cmd 4 ({} bytes)", response.len());
-                                            const MAX_PACKET: usize = 64;
-                                            let mut offset = 0;
-                                            while offset < response.len() {
-                                                let end = (offset + MAX_PACKET).min(response.len());
-                                                if class.write_packet(&response[offset..end]).await.is_err() {
-                                                    info!("  ERROR: write failed");
-                                                    break;
-                                                }
-                                                offset = end;
-                                                if offset < response.len() {
-                                                    embassy_time::Timer::after_micros(100).await;
-                                                }
+                                            // Simplified response like ArduPilot: board ID + hw rev + type
+                                            let response = build_msp_response(cmd, &[
+                                                b'S', b'7', b'2', b'2',  // board identifier
+                                                0, 0,                    // hardware revision
+                                                0,                       // hardware type (0 = FC)
+                                            ]);
+                                            info!("MSP TX cmd {}: {:02X?}", cmd, &response);
+                                            if class.write_packet(&response).await.is_err() {
+                                                info!("  ERROR: write failed");
                                             }
                                         }
                                         MSP_BUILD_INFO => {
@@ -237,24 +213,16 @@ pub async fn usb_cdc_console_task(
                                             }
                                         }
                                         MSP_ADVANCED_CONFIG => {
-                                            // cmd 90: gyro/motor config
+                                            // cmd 90: gyro/motor config (10 bytes like ArduPilot)
                                             let response = build_msp_response(cmd, &[
                                                 1,           // gyro_sync_denom (deprecated)
                                                 4,           // pid_process_denom
                                                 0,           // useContinuousUpdate
-                                                5,           // motorProtocol (DSHOT300 = 5)
+                                                6,           // motorProtocol: DSHOT300 = 6
                                                 0xE0, 0x01,  // motorPwmRate = 480
                                                 0xC2, 0x01,  // motorIdle = 450
                                                 0,           // gyro_use_32kHz (deprecated)
                                                 0,           // motorInversion
-                                                0,           // gyro_to_use (deprecated)
-                                                0,           // gyro_high_fsr
-                                                48,          // gyroMovementCalibrationThreshold
-                                                0x78, 0x00,  // gyroCalibrationDuration
-                                                0, 0,        // gyro_offset_yaw
-                                                2,           // checkOverflow
-                                                0,           // debug_mode
-                                                4,           // DEBUG_COUNT
                                             ]);
                                             info!("MSP TX cmd {}: {:02X?}", cmd, &response);
                                             if class.write_packet(&response).await.is_err() {
@@ -282,9 +250,10 @@ pub async fn usb_cdc_console_task(
                                             }
                                         }
                                         MSP_MOTOR => {
-                                            // cmd 104: 8 motor values as u16 (0 = stopped)
+                                            // cmd 104: 8 motor values as u16
+                                            // Return 1000 (minCommand/stopped) for configured motors
                                             let response = build_msp_response(cmd, &[
-                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 1-4 = 0 (stopped)
+                                                0xE8, 0x03, 0xE8, 0x03, 0xE8, 0x03, 0xE8, 0x03,  // motors 1-4 = 1000
                                                 0, 0, 0, 0, 0, 0, 0, 0,  // motors 5-8 = 0 (not present)
                                             ]);
                                             info!("MSP TX cmd {}: {:02X?}", cmd, &response);
