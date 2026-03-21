@@ -32,6 +32,23 @@ impl Default for OutputMode {
     }
 }
 
+/// ESC control mode for testing
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EscMode {
+    /// Normal operation - use MotorModulator
+    Normal,
+    /// Manual override with raw throttle values (left, right)
+    Override(u16, u16),
+    /// Stop sending DShot frames entirely
+    Off,
+}
+
+impl Default for EscMode {
+    fn default() -> Self {
+        EscMode::Normal
+    }
+}
+
 /// Console state containing output buffer, mode, and command accumulator
 pub struct ConsoleState {
     pub output_ring: ConstGenericRingBuffer<u8, CONSOLE_RING_SIZE>,
@@ -150,7 +167,53 @@ impl ConsoleState {
                 let _ = write!(response, "mode={} fill={}%\r\n", mode_str, fill_pct);
             }
             Some("help") => {
-                let _ = response.push_str("Commands: out <log|event|binevent>, status, help\r\n");
+                let _ = response.push_str("out status esc\r\n");
+            }
+            Some("esc") => {
+                let arg2 = parts.next();
+                match arg {
+                    Some("raw") => {
+                        // esc raw <left> <right>
+                        if let (Some(l_str), Some(r_str)) = (arg2, parts.next()) {
+                            if let (Ok(l), Ok(r)) = (l_str.parse::<u16>(), r_str.parse::<u16>()) {
+                                let l = l.min(2047);
+                                let r = r.min(2047);
+                                set_esc_mode(EscMode::Override(l, r));
+                                let _ = write!(response, "OK: esc raw {} {}\r\n", l, r);
+                            } else {
+                                let _ = response.push_str("ERR: invalid numbers\r\n");
+                            }
+                        } else {
+                            let _ = response.push_str("ERR: esc raw <left> <right>\r\n");
+                        }
+                    }
+                    Some("p") => {
+                        // esc p <left%> <right%>  (-100 to 100 -> 0 to 2047)
+                        if let (Some(l_str), Some(r_str)) = (arg2, parts.next()) {
+                            if let (Ok(l), Ok(r)) = (l_str.parse::<i16>(), r_str.parse::<i16>()) {
+                                let l_raw = percent_to_raw(l);
+                                let r_raw = percent_to_raw(r);
+                                set_esc_mode(EscMode::Override(l_raw, r_raw));
+                                let _ = write!(response, "OK: esc p {}% {}% (raw {} {})\r\n", l, r, l_raw, r_raw);
+                            } else {
+                                let _ = response.push_str("ERR: invalid numbers\r\n");
+                            }
+                        } else {
+                            let _ = response.push_str("ERR: esc p <left%> <right%>\r\n");
+                        }
+                    }
+                    Some("off") => {
+                        set_esc_mode(EscMode::Off);
+                        let _ = response.push_str("OK: esc off (no DShot frames)\r\n");
+                    }
+                    Some("normal") | Some("n") => {
+                        set_esc_mode(EscMode::Normal);
+                        let _ = response.push_str("OK: esc normal\r\n");
+                    }
+                    _ => {
+                        let _ = response.push_str("ERR: esc <raw|p|off|normal|n>\r\n");
+                    }
+                }
             }
             _ => {
                 let _ = response.push_str("ERR: unknown command (try 'help')\r\n");
@@ -158,6 +221,16 @@ impl ConsoleState {
         }
         response
     }
+}
+
+/// Convert percent (-100 to 100) to raw DShot value (0 to 2047)
+/// -100% -> 0, 0% -> 1024, 100% -> 2047
+fn percent_to_raw(percent: i16) -> u16 {
+    let clamped = percent.clamp(-100, 100) as i32;
+    // Map -100..100 to 0..2047
+    // -100 -> 0, 0 -> 1024 (approx), 100 -> 2047
+    let raw = ((clamped + 100) * 2047) / 200;
+    raw as u16
 }
 
 /// Format event as human-readable JSON-like array
@@ -311,6 +384,9 @@ pub type ConsoleMutex = Mutex<RefCell<ConsoleState>>;
 static UART_CONSOLE: StaticCell<ConsoleMutex> = StaticCell::new();
 static USB_CONSOLE: StaticCell<ConsoleMutex> = StaticCell::new();
 
+// Global ESC mode for motor control override
+static ESC_MODE: Mutex<RefCell<EscMode>> = Mutex::new(RefCell::new(EscMode::Normal));
+
 // Store references after initialization for later retrieval
 static mut UART_CONSOLE_REF: Option<&'static ConsoleMutex> = None;
 static mut USB_CONSOLE_REF: Option<&'static ConsoleMutex> = None;
@@ -337,4 +413,16 @@ pub fn get_uart_console() -> &'static ConsoleMutex {
 /// Get the USB console instance. Only valid after init_consoles().
 pub fn get_usb_console() -> &'static ConsoleMutex {
     unsafe { USB_CONSOLE_REF.unwrap_unchecked() }
+}
+
+/// Get the current ESC mode
+pub fn get_esc_mode() -> EscMode {
+    cortex_m::interrupt::free(|cs| *ESC_MODE.borrow(cs).borrow())
+}
+
+/// Set the ESC mode
+pub fn set_esc_mode(mode: EscMode) {
+    cortex_m::interrupt::free(|cs| {
+        *ESC_MODE.borrow(cs).borrow_mut() = mode;
+    });
 }

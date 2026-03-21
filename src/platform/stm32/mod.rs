@@ -345,25 +345,42 @@ async fn motor_update_task(
     loop {
         let ts = embassy_time::Instant::now().as_micros() as u64;
 
-        // Get motor speeds from MotorModulator
-        let (left_rpm, right_rpm) = critical_section::with(|cs| {
-            let mut modulator = motor_modulator.borrow(cs).borrow_mut();
-            modulator.step(ts)
-        });
+        // Check ESC mode for override
+        let esc_mode = console::get_esc_mode();
 
-        // Convert RPM to DShot throttle values
-        let left_throttle = rpm_to_dshot_throttle(left_rpm);
-        let right_throttle = rpm_to_dshot_throttle(right_rpm);
+        let (left_throttle, right_throttle, send_frame) = match esc_mode {
+            console::EscMode::Normal => {
+                // Get motor speeds from MotorModulator
+                let (left_rpm, right_rpm) = critical_section::with(|cs| {
+                    let mut modulator = motor_modulator.borrow(cs).borrow_mut();
+                    modulator.step(ts)
+                });
+                (rpm_to_dshot_throttle(left_rpm), rpm_to_dshot_throttle(right_rpm), true)
+            }
+            console::EscMode::Override(left, right) => {
+                (left, right, true)
+            }
+            console::EscMode::Off => {
+                (0, 0, false)
+            }
+        };
 
-        let left_frame = dshot::throttle_to_dshot_frame(left_throttle, false);
-        let right_frame = dshot::throttle_to_dshot_frame(right_throttle, false);
-        dshot_dma.send_frame(left_frame, right_frame);
+        if send_frame {
+            let left_frame = dshot::throttle_to_dshot_frame(left_throttle, false);
+            let right_frame = dshot::throttle_to_dshot_frame(right_throttle, false);
+            dshot_dma.send_frame(left_frame, right_frame);
+        }
 
         // Heartbeat log every ~2 seconds (1000 iterations at 500Hz)
         heartbeat_counter += 1;
         if heartbeat_counter >= 1000 {
             heartbeat_counter = 0;
-            info!("Motor: L={:.0} R={:.0} RPM, thr={}/{}", left_rpm, right_rpm, left_throttle, right_throttle);
+            let mode_str = match esc_mode {
+                console::EscMode::Normal => "normal",
+                console::EscMode::Override(_, _) => "override",
+                console::EscMode::Off => "off",
+            };
+            info!("Motor: thr={}/{} mode={}", left_throttle, right_throttle, mode_str);
         }
 
         Timer::after_micros(2000).await;
