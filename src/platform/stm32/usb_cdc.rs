@@ -239,14 +239,14 @@ pub async fn usb_cdc_console_task(
                                             let response = build_msp_response(cmd, &[
                                                 0xE8, 0x03,  // cycleTime
                                                 0, 0,        // i2cErrorCounter
-                                                0x20, 0,     // sensors (gyro = bit 5)
+                                                0x21, 0,     // sensors (ACC=bit0, gyro=bit5)
                                                 0, 0, 0, 0,  // flightModeFlags
                                                 0,           // currentPidProfileIndex
                                                 0, 0,        // averageSystemLoadPercent
                                                 0, 0,        // gyro cycle time
                                                 0,           // flightModeFlags extension byteCount
                                                 26,          // ARMING_DISABLE_FLAGS_COUNT
-                                                0, 0, 0, 0,  // armingDisableFlags
+                                                0x00, 0x01, 0, 0,  // armingDisableFlags (ARMING_DISABLED_MSP = bit 16)
                                                 0,           // rebootRequired
                                             ]);
                                             info!("MSP TX cmd 90: {:02X?}", &response);
@@ -273,7 +273,7 @@ pub async fn usb_cdc_console_task(
                                             let response = build_msp_response(cmd, &[
                                                 0xE8, 0x03,  // cycleTime
                                                 0, 0,        // i2cErrorCounter
-                                                0x20, 0,     // sensors (gyro = bit 5)
+                                                0x21, 0,     // sensors (ACC=bit0, gyro=bit5)
                                                 0, 0, 0, 0,  // flightModeFlags
                                                 0,           // currentPidProfileIndex
                                                 0, 0,        // averageSystemLoadPercent
@@ -281,7 +281,7 @@ pub async fn usb_cdc_console_task(
                                                 0,           // currentControlRateProfileIndex
                                                 0,           // flightModeFlags extension byteCount
                                                 26,          // ARMING_DISABLE_FLAGS_COUNT
-                                                0, 0, 0, 0,  // armingDisableFlags
+                                                0x00, 0x01, 0, 0,  // armingDisableFlags (ARMING_DISABLED_MSP = bit 16)
                                                 0,           // rebootRequired
                                             ]);
                                             info!("MSP TX cmd 101: {:02X?}", &response);
@@ -290,9 +290,11 @@ pub async fn usb_cdc_console_task(
                                             }
                                         }
                                         MSP_MOTOR => {
+                                            // Motor values: 1000 = stop, 2000 = full
+                                            // Only first 4 motors active, rest are 0
                                             let response = build_msp_response(cmd, &[
-                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 1-4
-                                                0, 0, 0, 0, 0, 0, 0, 0,  // motors 5-8
+                                                0xE8, 0x03, 0xE8, 0x03, 0xE8, 0x03, 0xE8, 0x03,  // motors 1-4 = 1000 (stopped)
+                                                0, 0, 0, 0, 0, 0, 0, 0,                          // motors 5-8 = 0 (disabled)
                                             ]);
                                             info!("MSP TX cmd 124: {:02X?}", &response);
                                             if class.write_packet(&response).await.is_err() {
@@ -300,8 +302,8 @@ pub async fn usb_cdc_console_task(
                                             }
                                         }
                                         MSP_BOXIDS => {
-                                            // BOXARM=0, BOXPREARM=36
-                                            let response = build_msp_response(cmd, &[0, 36]);
+                                            // Always enabled: BOXARM=0, BOXFAILSAFE=27, BOXFPVANGLEMIX=30, BOXPREARM=36
+                                            let response = build_msp_response(cmd, &[0, 27, 30, 36]);
                                             info!("MSP TX cmd 104: {:02X?}", &response);
                                             if class.write_packet(&response).await.is_err() {
                                                 info!("  ERROR: write failed");
@@ -311,8 +313,8 @@ pub async fn usb_cdc_console_task(
                                             let response = build_msp_response(cmd, &[
                                                 1,           // gyro_sync_denom
                                                 1,           // pid_process_denom
-                                                0,           // useContinuousUpdate
-                                                5,           // motorProtocol (DSHOT300)
+                                                0,           // useUnsyncedPwm
+                                                6,           // motorProtocol (DSHOT300 = 6)
                                                 0xE8, 0x03,  // motorPwmRate
                                                 0, 0,        // motorIdle
                                                 0,           // gyro_use_32kHz
