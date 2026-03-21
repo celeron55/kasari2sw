@@ -23,6 +23,7 @@ mod usb_cdc;
 mod console;
 pub mod dshot;
 pub mod dshot_dma;
+pub mod blheli_passthrough;
 // mod debug_uart;  // Commented out - not used
 
 use kasarisw::shared::kasari::{InputEvent, MainLogic, MotorModulator};
