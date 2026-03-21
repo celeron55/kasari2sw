@@ -5,7 +5,8 @@ const MSP_HEADER: &[u8] = b"$M<";
 const MSP_PASSTHROUGH_ESC_4WAY: u8 = 0xFF;
 
 // 4-way interface constants
-const ESC_LOCAL_ESCAPE: u8 = 0x2F;
+const ESC_LOCAL_ESCAPE: u8 = 0x2F;   // '/' - used in requests from PC
+const ESC_REMOTE_ESCAPE: u8 = 0x2E;  // '.' - used in responses from FC
 
 // 4-way commands
 const CMD_INTERFACE_TEST_ALIVE: u8 = 0x30;
@@ -81,8 +82,8 @@ const ESC_COUNT: u8 = 4;
 
 // Interface info
 const INTERFACE_NAME: &[u8] = b"KASARI2";
-const PROTOCOL_VERSION: u16 = 108;
-const INTERFACE_VERSION: u16 = 1;
+const PROTOCOL_VERSION: u8 = 108;  // Must be >= 107 for blhelisuite32
+const INTERFACE_VERSION: u16 = 20001;  // Must be >= 20001 for blhelisuite32
 
 pub struct MspParser {
     state: MspState,
@@ -447,7 +448,7 @@ impl FourWayInterface {
             }
 
             CMD_PROTOCOL_GET_VERSION => {
-                let _ = data.push((PROTOCOL_VERSION >> 8) as u8);
+                // Protocol version is uint8_t (1 byte), value 107+
                 let _ = data.push(PROTOCOL_VERSION as u8);
                 (data, ACK_OK)
             }
@@ -460,8 +461,9 @@ impl FourWayInterface {
             }
 
             CMD_INTERFACE_GET_VERSION => {
-                let _ = data.push((INTERFACE_VERSION >> 8) as u8);
-                let _ = data.push(INTERFACE_VERSION as u8);
+                // BCD-like encoding: [version/100, version%100]
+                let _ = data.push((INTERFACE_VERSION / 100) as u8);
+                let _ = data.push((INTERFACE_VERSION % 100) as u8);
                 (data, ACK_OK)
             }
 
@@ -657,7 +659,7 @@ impl FourWayInterface {
         let mut response: heapless::Vec<u8, 280> = heapless::Vec::new();
 
         // Response format: ESC + CMD + ADDR_H + ADDR_L + PARAM_LEN + [PARAM] + ACK + CRC_H + CRC_L
-        let _ = response.push(ESC_LOCAL_ESCAPE);
+        let _ = response.push(ESC_REMOTE_ESCAPE);  // 0x2E for responses
         let _ = response.push(cmd);
         let _ = response.push((addr >> 8) as u8);
         let _ = response.push(addr as u8);

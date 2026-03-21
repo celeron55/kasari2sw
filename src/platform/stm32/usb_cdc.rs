@@ -109,6 +109,8 @@ pub async fn usb_cdc_console_task(
                             static mut FRAME_BUF: [u8; FRAME_BUF_SIZE] = [0u8; FRAME_BUF_SIZE];
                             static mut FRAME_POS: usize = 0;
 
+                            info!("4way RX {} bytes: {:02X?}", n, &rx_buf[..n.min(16)]);
+
                             unsafe {
                                 for &byte in &rx_buf[..n] {
                                     // Collect frame bytes
@@ -127,9 +129,13 @@ pub async fn usb_cdc_console_task(
                                         let expected_len = 5 + param_len + 2;
                                         if FRAME_POS >= expected_len {
                                             // Process complete frame
+                                            info!("4way frame cmd=0x{:02X} len={}", FRAME_BUF[1], FRAME_POS);
                                             let response = four_way.handle_frame(&FRAME_BUF[..FRAME_POS]);
+                                            info!("4way TX: {:02X?}", response.as_slice());
                                             if !response.is_empty() {
-                                                let _ = class.write_packet(&response).await;
+                                                if class.write_packet(&response).await.is_err() {
+                                                    info!("4way TX error");
+                                                }
                                             }
                                             FRAME_POS = 0;
                                         }
@@ -328,24 +334,18 @@ pub async fn usb_cdc_console_task(
                                         MSP_SET_PASSTHROUGH => {
                                             // cmd 245: enter passthrough mode
                                             info!("MSP cmd {} - entering passthrough", cmd);
+
+                                            // Configure motor pins as GPIO input with pull-up
+                                            // (timer outputs will be overridden by GPIO mode)
+                                            init_motor_pins_gpio();
+
                                             let response = build_msp_response(cmd, &[4]);  // 4 ESCs
                                             if class.write_packet(&response).await.is_err() {
                                                 info!("  ERROR: write failed");
                                             }
-                                            Timer::after(Duration::from_millis(10)).await;
-
-                                            // Disable DShot/motor control timers
-                                            unsafe {
-                                                let tim3_cr1 = 0x4000_0400 as *mut u32;
-                                                core::ptr::write_volatile(tim3_cr1, 0);
-                                                let tim1_cr1 = 0x4001_0000 as *mut u32;
-                                                core::ptr::write_volatile(tim1_cr1, 0);
-                                            }
-
-                                            // Configure motor pins as GPIO input with pull-up
-                                            init_motor_pins_gpio();
 
                                             passthrough_mode = true;
+                                            info!("Passthrough mode active");
                                         }
                                         _ => {
                                             // Unknown command - send empty response
