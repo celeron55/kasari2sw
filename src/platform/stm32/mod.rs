@@ -330,12 +330,12 @@ async fn motor_update_task(
     let mut dshot_dma = dshot_dma::DShotDma::new();
     dshot_dma.init();
 
-    // ESC arming sequence (throttle=0 for 300ms)
-    info!("Sending ESC arming sequence (throttle=0 for 300ms)...");
+    // ESC arming sequence (throttle=0 for 300ms on all 4 channels)
+    info!("Sending ESC arming sequence (throttle=0 for 300ms, all 4 channels)...");
     let arm_start = embassy_time::Instant::now();
     while arm_start.elapsed().as_millis() < 300 {
         let frame = dshot::throttle_to_dshot_frame(0, false);
-        dshot_dma.send_frame(frame, frame);
+        dshot_dma.send_frame_all(frame, frame, frame, frame);
     }
     info!("ESC armed");
 
@@ -368,7 +368,8 @@ async fn motor_update_task(
         if send_frame {
             let left_frame = dshot::throttle_to_dshot_frame(left_throttle, false);
             let right_frame = dshot::throttle_to_dshot_frame(right_throttle, false);
-            dshot_dma.send_frame(left_frame, right_frame);
+            // Send same throttle to all 4 ESC channels (4-in-1 ESC requires all channels)
+            dshot_dma.send_frame_all(left_frame, right_frame, left_frame, right_frame);
         }
 
         // Heartbeat log every ~2 seconds (1000 iterations at 500Hz)
