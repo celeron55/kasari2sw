@@ -152,53 +152,83 @@ pub async fn usb_cdc_console_task(
                                         MSP_API_VERSION => {
                                             // MSP_PROTOCOL_VERSION=0, API_VERSION_MAJOR=1, API_VERSION_MINOR=48
                                             let response = build_msp_response(cmd, &[0, 1, 48]);
-                                            info!("MSP TX cmd 1");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 1 ({} bytes)", response.len());
+                                            let write_result = class.write_packet(&response).await;
+                                            if write_result.is_err() {
+                                                info!("  write error: {:?}", write_result);
+                                            }
                                         }
                                         MSP_FC_VARIANT => {
                                             // FLIGHT_CONTROLLER_IDENTIFIER_LENGTH = 4
                                             let response = build_msp_response(cmd, b"BTFL");
-                                            info!("MSP TX cmd 2");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 2 ({} bytes)", response.len());
+                                            let write_result = class.write_packet(&response).await;
+                                            if write_result.is_err() {
+                                                info!("  write error: {:?}", write_result);
+                                            }
                                         }
                                         MSP_FC_VERSION => {
-                                            // year-2000, month, patch, then pstring version
+                                            // Betaflight 4.3.2: major, minor, patch (3 bytes, no pstring)
                                             let response = build_msp_response(cmd, &[
-                                                24,  // FC_VERSION_YEAR - 2000
-                                                5,   // FC_VERSION_MONTH
-                                                0,   // FC_VERSION_PATCH_LEVEL
-                                                5, b'4', b'.', b'5', b'.', b'0',  // pstring "4.5.0"
+                                                4,   // FC_VERSION_MAJOR
+                                                3,   // FC_VERSION_MINOR
+                                                2,   // FC_VERSION_PATCH_LEVEL
                                             ]);
-                                            info!("MSP TX cmd 3");
-                                            let _ = class.write_packet(&response).await;
+                                            info!("MSP TX cmd 3 ({} bytes)", response.len());
+                                            let write_result = class.write_packet(&response).await;
+                                            if write_result.is_err() {
+                                                info!("  write error: {:?}", write_result);
+                                            }
                                         }
                                         MSP_BOARD_INFO => {
-                                            // Full BOARD_INFO for API 1.48
-                                            let response = build_msp_response(cmd, &[
+                                            // Betaflight 4.3.2 format (API 1.44) - 64 byte payload
+                                            let target_name = b"STM32F722RE";
+                                            let payload: heapless::Vec<u8, 64> = heapless::Vec::from_slice(&[
                                                 b'S', b'7', b'2', b'2',  // boardIdentifier (4)
                                                 0, 0,                    // hardwareRevision (2)
                                                 0,                       // type: 0=FC (1)
-                                                1,                       // targetCapabilities: VCP (1)
-                                                11,                      // targetName length
+                                                1,                       // targetCapabilities: VCP=1 (1)
+                                                target_name.len() as u8,  // targetName length
                                                 b'S', b'T', b'M', b'3', b'2', b'F', b'7', b'2', b'2', b'R', b'E',
                                                 0,                       // boardName length (empty)
                                                 0,                       // manufacturerId length (empty)
                                                 // signature (32 bytes, all zeros)
                                                 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
                                                 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-                                                4,                       // mcuTypeId (4=MCU_TYPE_F722)
+                                                6,                       // mcuTypeId (6=MCU_TYPE_F722)
                                                 1,                       // configurationState (1=CONFIGURED)
                                                 0xE8, 0x03,              // sampleRateHz (1000)
                                                 0, 0, 0, 0,              // configurationProblems (none)
                                                 0,                       // spiDeviceCount
                                                 0,                       // i2cDeviceCount
-                                            ]);
-                                            info!("MSP TX cmd 4");
-                                            let _ = class.write_packet(&response).await;
+                                            ]).unwrap();
+                                            let response = build_msp_response(cmd, &payload);
+                                            info!("MSP TX cmd 4 ({} bytes)", response.len());
+                                            // Send in 64-byte chunks (full-speed USB max)
+                                            const MAX_PACKET: usize = 64;
+                                            let mut offset = 0;
+                                            while offset < response.len() {
+                                                let end = (offset + MAX_PACKET).min(response.len());
+                                                let _ = class.write_packet(&response[offset..end]).await;
+                                                offset = end;
+                                                if offset < response.len() {
+                                                    embassy_time::Timer::after_micros(100).await;
+                                                }
+                                            }
                                         }
                                         MSP_BUILD_INFO => {
-                                            // date(11) + time(8) + gitrev(7) = 26 bytes exactly
-                                            let response = build_msp_response(cmd, b"Mar 21 202612:00:00abcdefg");
+                                            // Betaflight format: date(11) + time(8) + gitrev(7) = 26 bytes
+                                            // Build date: "Mar 21 2026" (11 chars, padded with spaces)
+                                            // Build time: "12:00:00" (8 chars)
+                                            // Git rev: "abcdefg" (7 chars)
+                                            let date = b"Mar 21 2026";
+                                            let time = b"12:00:00";
+                                            let git_rev = b"abcdefg";
+                                            let mut payload = [0u8; 26];
+                                            payload[..11].copy_from_slice(date);
+                                            payload[11..19].copy_from_slice(time);
+                                            payload[19..26].copy_from_slice(git_rev);
+                                            let response = build_msp_response(cmd, &payload);
                                             info!("MSP TX cmd 5");
                                             let _ = class.write_packet(&response).await;
                                         }
@@ -209,21 +239,20 @@ pub async fn usb_cdc_console_task(
                                             let _ = class.write_packet(&response).await;
                                         }
                                         MSP_STATUS => {
-                                            // MSP_STATUS format - same as STATUS_EX but with gyro cycle time instead of profiles
+                                            // Betaflight 4.3.2 MSP_STATUS format
+                                            // cycleTime(2) + i2cError(2) + sensors(2) + flightModeFlags(4) + pidProfile(1) + avgLoad(2) + gyroCycle(2) + flagByteCount(1) + armingDisableCount(1) + armingDisableFlags(4) + rebootRequired(1)
                                             let response = build_msp_response(cmd, &[
                                                 0xE8, 0x03,  // cycleTime (1000us)
                                                 0, 0,        // i2cErrorCounter
                                                 0x20, 0,     // sensors (gyro = bit 5)
-                                                0, 0, 0, 0,  // flightModeFlags (disarmed)
+                                                0, 0, 0, 0,  // flightModeFlags (4 bytes)
                                                 0,           // currentPidProfileIndex
                                                 0, 0,        // averageSystemLoadPercent
-                                                0, 0,        // gyro cycle time (MSP_STATUS uses this)
-                                                0,           // flightModeFlags extension byteCount (0 extra bytes)
-                                                29,          // ARMING_DISABLE_FLAGS_COUNT
+                                                0, 0,        // gyro cycle time (MSP_STATUS)
+                                                0,           // flightModeFlags extension byteCount
+                                                26,          // ARMING_DISABLE_FLAGS_COUNT (26 in 4.3.2)
                                                 0, 0, 0, 0,  // armingDisableFlags = 0 (all clear)
-                                                0,           // rebootRequired = false
-                                                25, 0,       // coreTemperature = 25C
-                                                3,           // CONTROL_RATE_PROFILE_COUNT
+                                                0,           // rebootRequired
                                             ]);
                                             info!("MSP TX cmd 90");
                                             let _ = class.write_packet(&response).await;
@@ -243,22 +272,21 @@ pub async fn usb_cdc_console_task(
                                             let _ = class.write_packet(&response).await;
                                         }
                                         MSP_STATUS_EX => {
-                                            // MSP_STATUS_EX - matches Betaflight format
+                                            // Betaflight 4.3.2 MSP_STATUS_EX format
+                                            // cycleTime(2) + i2cError(2) + sensors(2) + flightModeFlags(4) + pidProfile(1) + avgLoad(2) + pidCount(1) + rateProfile(1) + flagByteCount(1) + armingDisableCount(1) + armingDisableFlags(4) + rebootRequired(1)
                                             let response = build_msp_response(cmd, &[
                                                 0xE8, 0x03,  // cycleTime (1000us)
                                                 0, 0,        // i2cErrorCounter
                                                 0x20, 0,     // sensors (gyro = bit 5)
-                                                0, 0, 0, 0,  // flightModeFlags (disarmed)
+                                                0, 0, 0, 0,  // flightModeFlags (4 bytes)
                                                 0,           // currentPidProfileIndex
                                                 0, 0,        // averageSystemLoadPercent
                                                 3,           // PID_PROFILE_COUNT
                                                 0,           // currentControlRateProfileIndex
-                                                0,           // flightModeFlags extension byteCount (0 extra bytes)
-                                                29,          // ARMING_DISABLE_FLAGS_COUNT = 29
+                                                0,           // flightModeFlags extension byteCount
+                                                26,          // ARMING_DISABLE_FLAGS_COUNT (26 in 4.3.2)
                                                 0, 0, 0, 0,  // armingDisableFlags = 0 (all clear)
-                                                0,           // rebootRequired = false
-                                                25, 0,       // coreTemperature = 25C
-                                                3,           // CONTROL_RATE_PROFILE_COUNT
+                                                0,           // rebootRequired
                                             ]);
                                             info!("MSP TX cmd 101");
                                             let _ = class.write_packet(&response).await;
@@ -273,8 +301,8 @@ pub async fn usb_cdc_console_task(
                                             let _ = class.write_packet(&response).await;
                                         }
                                         MSP_BOXIDS => {
-                                            // Empty box IDs list
-                                            let response = build_msp_response(cmd, &[]);
+                                            // BOXARM=0, BOXPREARM=36 (minimal config)
+                                            let response = build_msp_response(cmd, &[0, 36]);
                                             info!("MSP TX cmd 104");
                                             let _ = class.write_packet(&response).await;
                                         }
@@ -302,8 +330,8 @@ pub async fn usb_cdc_console_task(
                                             let _ = class.write_packet(&response).await;
                                         }
                                         MSP_REBOOT => {
-                                            // Just ACK, don't actually reboot
-                                            let response = build_msp_response(cmd, &[]);
+                                            // Return the reboot mode that was requested
+                                            let response = build_msp_response(cmd, &[0]);  // 0 = MSP_REBOOT_FIRMWARE
                                             info!("MSP TX cmd 68");
                                             let _ = class.write_packet(&response).await;
                                         }
